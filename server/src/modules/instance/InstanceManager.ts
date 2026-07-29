@@ -12,6 +12,12 @@ const execAsync = promisify(exec)
 
 export type InstanceType = 'generic' | 'minecraft-java' | 'minecraft-bedrock'
 
+export interface SteamInstanceConfig {
+  appId: string
+  gameKey: string
+  branch: string
+}
+
 export interface Instance {
   id: string
   name: string
@@ -31,6 +37,7 @@ export interface Instance {
   terminalUser?: string
   instanceType?: InstanceType
   javaVersion?: string
+  steam?: SteamInstanceConfig
 }
 
 export interface CreateInstanceRequest {
@@ -45,6 +52,7 @@ export interface CreateInstanceRequest {
   terminalUser?: string
   instanceType?: InstanceType
   javaVersion?: string
+  steam?: SteamInstanceConfig
 }
 
 export class InstanceManager extends EventEmitter {
@@ -269,7 +277,14 @@ export class InstanceManager extends EventEmitter {
           programPath: instanceData.programPath ?? '',
           terminalUser: instanceData.terminalUser ?? '',
           instanceType: instanceData.instanceType ?? 'generic',
-          javaVersion: instanceData.javaVersion ?? undefined
+          javaVersion: instanceData.javaVersion ?? undefined,
+          steam: instanceData.steam && instanceData.steam.appId
+            ? {
+                appId: String(instanceData.steam.appId),
+                gameKey: String(instanceData.steam.gameKey || ''),
+                branch: String(instanceData.steam.branch || 'public')
+              }
+            : undefined
         }
         this.instances.set(instance.id, instance)
       }
@@ -312,7 +327,8 @@ export class InstanceManager extends EventEmitter {
           programPath: instance.programPath,
           terminalUser: instance.terminalUser,
           instanceType: instance.instanceType,
-          javaVersion: instance.javaVersion
+          javaVersion: instance.javaVersion,
+          steam: instance.steam
         }))
         
         await fs.writeFile(this.configPath, JSON.stringify(instancesData, null, 2))

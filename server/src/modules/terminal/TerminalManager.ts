@@ -60,6 +60,19 @@ interface TerminalResizeData {
   rows: number
 }
 
+export interface ManagedProcessOptions {
+  executablePath: string
+  args: string[]
+  workingDirectory: string
+  redactValues?: string[]
+}
+
+interface ManagedProcessResult {
+  code: number | null
+  signal: NodeJS.Signals | null
+  output: string
+}
+
 export class TerminalManager {
   private sessions: Map<string, PtySession> = new Map()
   private io: SocketIOServer
@@ -110,6 +123,50 @@ export class TerminalManager {
         this.logger.error(`无法获取 PTY 文件名: ${nameError.message}`)
       }
     }
+  }
+
+  public async runManagedProcess(options: ManagedProcessOptions): Promise<ManagedProcessResult> {
+    const { executablePath, args, workingDirectory, redactValues = [] } = options
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const child = spawn(executablePath, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: workingDirectory,
+        env: buildUtf8LocaleEnv(process.env),
+        shell: false,
+        windowsHide: true
+      })
+      const outputChunks: string[] = []
+      let outputLengthBytes = 0
+      const maxOutputLength = 10 * 1024 * 1024
+      const redactOutput = (output: string) => redactValues.reduce(
+        (redacted, secret) => secret ? redacted.split(secret).join('******') : redacted,
+        output
+      )
+      const appendOutput = (data: Buffer) => {
+        const output = redactOutput(data.toString())
+        outputLengthBytes += Buffer.byteLength(output)
+        if (outputLengthBytes > maxOutputLength && !settled) {
+          settled = true
+          child.kill()
+          reject(new Error('托管进程输出过大'))
+          return
+        }
+        outputChunks.push(output)
+      }
+      child.stdout?.on('data', appendOutput)
+      child.stderr?.on('data', appendOutput)
+      child.once('error', error => {
+        if (settled) return
+        settled = true
+        reject(error)
+      })
+      child.once('exit', (code, signal) => {
+        if (settled) return
+        settled = true
+        resolve({ code, signal, output: outputChunks.join('') })
+      })
+    })
   }
 
   /**

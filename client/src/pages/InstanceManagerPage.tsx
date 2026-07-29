@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus,
@@ -17,10 +17,12 @@ import {
   Server,
   ShoppingCart,
   Download,
+  RefreshCw,
+  GitBranch,
   HelpCircle,
   X
 } from 'lucide-react'
-import { Instance, CreateInstanceRequest } from '@/types'
+import { Instance, CreateInstanceRequest, SteamBranchInfo } from '@/types'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useSystemStore } from '@/stores/systemStore'
 import apiClient from '@/utils/api'
@@ -114,10 +116,20 @@ const InstanceManagerPage: React.FC = () => {
     programPath: '',
     terminalUser: '',
     instanceType: 'generic',
-    javaVersion: ''
+    javaVersion: '',
+    steam: undefined
   })
   const [javaEnvironments, setJavaEnvironments] = useState<any[]>([])
   const [loadingJava, setLoadingJava] = useState(false)
+  const [steamUpdateInstance, setSteamUpdateInstance] = useState<Instance | null>(null)
+  const [steamUpdateModalAnimating, setSteamUpdateModalAnimating] = useState(false)
+  const [steamUpdateBranches, setSteamUpdateBranches] = useState<SteamBranchInfo[]>([])
+  const [steamUpdateBranch, setSteamUpdateBranch] = useState('public')
+  const [steamUpdateBranchPassword, setSteamUpdateBranchPassword] = useState('')
+  const [steamUpdateValidate, setSteamUpdateValidate] = useState(true)
+  const [steamUpdateLoadingBranches, setSteamUpdateLoadingBranches] = useState(false)
+  const [steamUpdating, setSteamUpdating] = useState(false)
+  const steamUpdateBranchRequestId = useRef(0)
 
   // 停止按钮状态管理
   const [disabledStopButtons, setDisabledStopButtons] = useState<Set<string>>(new Set())
@@ -487,7 +499,8 @@ const InstanceManagerPage: React.FC = () => {
           stopCommand: 'stop',
           enableStreamForward: false,
           programPath: '',
-          terminalUser: ''
+          terminalUser: '',
+          steam: pendingInstance.steam
         })
 
         // 打开创建模态框
@@ -706,6 +719,104 @@ const InstanceManagerPage: React.FC = () => {
         title: '更新失败',
         message: errorMessage
       })
+    }
+  }
+
+  const handleOpenSteamUpdateModal = async (instance: Instance) => {
+    if (!instance.steam?.appId) return
+    const requestId = ++steamUpdateBranchRequestId.current
+
+    setSteamUpdateInstance(instance)
+    setSteamUpdateBranches([])
+    setSteamUpdateBranch(instance.steam.branch || 'public')
+    setSteamUpdateBranchPassword('')
+    setSteamUpdateValidate(true)
+    setSteamUpdateLoadingBranches(true)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setSteamUpdateModalAnimating(true))
+    })
+
+    try {
+      const response = await apiClient.getSteamBranches(instance.steam.appId)
+      if (requestId !== steamUpdateBranchRequestId.current) return
+      if (response.success) {
+        const branches = response.data || []
+        setSteamUpdateBranches(branches)
+        if (!branches.some(branchInfo => branchInfo.name === (instance.steam?.branch || 'public'))) {
+          setSteamUpdateBranch(branches.find(branchInfo => branchInfo.isDefault)?.name || 'public')
+        }
+      } else {
+        throw new Error(response.message || '无法获取Steam分支')
+      }
+    } catch (error: any) {
+      if (requestId !== steamUpdateBranchRequestId.current) return
+      console.warn('获取Steam分支失败:', error)
+      addNotification({
+        type: 'warning',
+        title: '分支列表不可用',
+        message: error.message || '将继续使用实例当前分支'
+      })
+    } finally {
+      if (requestId === steamUpdateBranchRequestId.current) {
+        setSteamUpdateLoadingBranches(false)
+      }
+    }
+  }
+
+  const handleCloseSteamUpdateModal = () => {
+    steamUpdateBranchRequestId.current++
+    setSteamUpdateModalAnimating(false)
+    setTimeout(() => {
+      setSteamUpdateInstance(null)
+      setSteamUpdateBranches([])
+      setSteamUpdateBranch('public')
+      setSteamUpdateBranchPassword('')
+      setSteamUpdateValidate(true)
+    }, 300)
+  }
+
+  const handleUpdateSteamServer = async () => {
+    if (!steamUpdateInstance) return
+
+    const selectedBranchInfo = steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch)
+    if (selectedBranchInfo?.requiresPassword && !steamUpdateBranchPassword.trim()) {
+      addNotification({
+        type: 'error',
+        title: '缺少分支密码',
+        message: '该Steam测试分支需要输入密码'
+      })
+      return
+    }
+
+    try {
+      setSteamUpdating(true)
+      const response = await apiClient.updateSteamInstance({
+        instanceId: steamUpdateInstance.id,
+        branch: steamUpdateBranch,
+        betaPassword: steamUpdateBranchPassword.trim() || undefined,
+        validate: steamUpdateValidate
+      })
+
+      if (!response.success || !response.data?.instance) {
+        throw new Error(response.message || '服务端更新失败')
+      }
+
+      addNotification({
+        type: 'success',
+        title: '更新完成',
+        message: `实例 "${steamUpdateInstance.name}" 已更新到 ${steamUpdateBranch} 分支`
+      })
+      handleCloseSteamUpdateModal()
+      await fetchInstances()
+    } catch (error: any) {
+      console.error('更新Steam实例失败:', error)
+      addNotification({
+        type: 'error',
+        title: '更新失败',
+        message: error.message || error.error || '无法开始Steam服务端更新'
+      })
+    } finally {
+      setSteamUpdating(false)
     }
   }
 
@@ -1053,7 +1164,8 @@ const InstanceManagerPage: React.FC = () => {
       programPath: '',
       terminalUser: '',
       instanceType: 'generic',
-      javaVersion: ''
+      javaVersion: '',
+      steam: undefined
     })
   }
 
@@ -1140,7 +1252,8 @@ const InstanceManagerPage: React.FC = () => {
       programPath: instance.programPath || '',
       terminalUser: instance.terminalUser || '',
       instanceType: instance.instanceType || 'generic',
-      javaVersion: instance.javaVersion || ''
+      javaVersion: instance.javaVersion || '',
+      steam: instance.steam
     })
     setShowCreateModal(true)
     setTimeout(() => setCreateModalAnimating(true), 10)
@@ -1361,6 +1474,14 @@ const InstanceManagerPage: React.FC = () => {
                     <Terminal className="w-4 h-4 mr-2" />
                     <span className="truncate">{instance.startCommand}</span>
                   </div>
+                  {instance.steam && (
+                    <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                      <GitBranch className="w-4 h-4 mr-2" />
+                      <span className="truncate">
+                        Steam分支: {instance.steam.branch || 'public'} · AppID {instance.steam.appId}
+                      </span>
+                    </div>
+                  )}
                   {instance.lastStarted && (
                     <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
                       <Clock className="w-4 h-4 mr-2" />
@@ -1415,6 +1536,20 @@ const InstanceManagerPage: React.FC = () => {
                       <FolderOpen className="w-4 h-4" />
                       <span>文件</span>
                     </button>
+                    {instance.steam && (
+                      <button
+                        onClick={() => handleOpenSteamUpdateModal(instance)}
+                        disabled={instance.status === 'running' || instance.status === 'starting' || instance.status === 'stopping'}
+                        className={`flex items-center space-x-1 px-3 py-1.5 rounded-md transition-colors ${instance.status === 'running' || instance.status === 'starting' || instance.status === 'stopping'
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                          }`}
+                        title={instance.status === 'stopped' || instance.status === 'error' ? '选择Steam分支并更新服务端' : '请先停止实例'}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        <span>更新</span>
+                      </button>
+                    )}
                   </div>
                   <div className="flex items-center space-x-1">
                     <button
@@ -2449,6 +2584,118 @@ const InstanceManagerPage: React.FC = () => {
           setStartErrorMessage('')
         }}
       />
+
+      {/* Steam服务端更新弹窗 */}
+      {steamUpdateInstance && (
+        <div className={`fixed inset-0 bg-black/50 flex items-center justify-center z-50 transition-opacity duration-300 ${steamUpdateModalAnimating ? 'opacity-100' : 'opacity-0'
+          }`}>
+          <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 transform transition-all duration-300 ${steamUpdateModalAnimating ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
+            } max-h-[90vh] flex flex-col`}>
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">更新Steam服务端</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{steamUpdateInstance.name}</p>
+              </div>
+              <button
+                onClick={handleCloseSteamUpdateModal}
+                disabled={steamUpdating}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  服务器版本（Steam分支）
+                </label>
+                <select
+                  value={steamUpdateBranch}
+                  onChange={(e) => {
+                    setSteamUpdateBranch(e.target.value)
+                    setSteamUpdateBranchPassword('')
+                  }}
+                  disabled={steamUpdateLoadingBranches || steamUpdating}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+                >
+                  {steamUpdateLoadingBranches && <option value={steamUpdateBranch}>正在查询Steam分支...</option>}
+                  {!steamUpdateLoadingBranches && steamUpdateBranches.length === 0 && (
+                    <option value={steamUpdateBranch}>{steamUpdateBranch}（当前分支）</option>
+                  )}
+                  {!steamUpdateLoadingBranches && steamUpdateBranches.map(branchInfo => (
+                    <option key={branchInfo.name} value={branchInfo.name}>
+                      {branchInfo.name}
+                      {branchInfo.description ? ` - ${branchInfo.description}` : ''}
+                      {branchInfo.buildId ? ` (Build ${branchInfo.buildId})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  public 为默认稳定分支；其他名称通常代表测试版或历史发布通道。
+                </p>
+              </div>
+
+              {steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch)?.requiresPassword && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    分支密码
+                  </label>
+                  <input
+                    type="password"
+                    value={steamUpdateBranchPassword}
+                    onChange={(e) => setSteamUpdateBranchPassword(e.target.value)}
+                    disabled={steamUpdating}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+                    placeholder="输入Steam测试分支密码"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    密码只用于本次更新，不会保存。
+                  </p>
+                </div>
+              )}
+
+              <label className="flex items-start space-x-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={steamUpdateValidate}
+                  onChange={(e) => setSteamUpdateValidate(e.target.checked)}
+                  disabled={steamUpdating}
+                  className="mt-1 w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <div className="text-sm font-medium text-gray-800 dark:text-gray-200">校验游戏完整性</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    更新时附加 validate，修复缺失或损坏的服务端文件。
+                  </div>
+                </div>
+              </label>
+
+              <div className="rounded-lg border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-800 dark:text-yellow-200">
+                更新会修改工作目录中的服务端文件，请确认实例已停止并提前备份重要存档。
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={handleCloseSteamUpdateModal}
+                disabled={steamUpdating}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleUpdateSteamServer}
+                disabled={steamUpdating || steamUpdateLoadingBranches || Boolean(steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch)?.requiresPassword && !steamUpdateBranchPassword.trim())}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white rounded-lg transition-colors flex items-center space-x-2"
+              >
+                {steamUpdating ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                <span>{steamUpdating ? '更新中...' : '开始更新'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 启动命令帮助模态框 */}
       {showStartCommandHelpModal && (

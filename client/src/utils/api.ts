@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, HasUsersResponse, ApiResponse, User, Instance, CreateInstanceRequest, CaptchaResponse, CheckCaptchaResponse } from '@/types'
+import { LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, HasUsersResponse, ApiResponse, User, Instance, CreateInstanceRequest, CaptchaResponse, CheckCaptchaResponse, SteamBranchInfo } from '@/types'
 import config from '@/config'
 import { useNotificationStore } from '@/stores/notificationStore'
 
@@ -509,12 +509,28 @@ class ApiClient {
     useAnonymous: boolean
     steamUsername?: string
     steamPassword?: string
-    steamcmdCommand: string
     existingInstanceId?: string
     updateInstanceInfo?: boolean
     resetSteamManifest?: boolean
+    branch?: string
+    betaPassword?: string
+    launchArgs?: string
+    validateGameIntegrity?: boolean
   }) {
     return this.post('/game-deployment/install', data)
+  }
+
+  async getSteamBranches(appId: string) {
+    return this.get<SteamBranchInfo[]>(`/game-deployment/steam/branches/${encodeURIComponent(appId)}`)
+  }
+
+  async updateSteamInstance(data: {
+    instanceId: string
+    branch: string
+    betaPassword?: string
+    validate?: boolean
+  }) {
+    return this.post<{ instance: Instance; requestedBranch: string; output?: string }>('/game-deployment/steam/update', data)
   }
 
   // 定时任务API
