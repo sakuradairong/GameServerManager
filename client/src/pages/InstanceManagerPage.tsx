@@ -34,6 +34,8 @@ import SearchableSelect from '@/components/SearchableSelect'
 import RconConsole from '@/components/RconConsole'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatFileSize } from '@/utils/format'
+import { io, Socket } from 'socket.io-client'
+import config from '@/config'
 
 // 获取嵌套对象值的工具函数
 const getNestedValue = (obj: any, ...path: string[]): any => {
@@ -133,7 +135,11 @@ const InstanceManagerPage: React.FC = () => {
   const [steamUpdateLoadingBranches, setSteamUpdateLoadingBranches] = useState(false)
   const [steamUpdateBranchesError, setSteamUpdateBranchesError] = useState('')
   const [steamUpdating, setSteamUpdating] = useState(false)
+  const [steamUpdateLogs, setSteamUpdateLogs] = useState<string[]>([])
   const steamUpdateBranchRequestId = useRef(0)
+  const steamUpdateSocketRef = useRef<Socket | null>(null)
+  const steamUpdateIdRef = useRef<string | null>(null)
+  const steamUpdateInstanceIdRef = useRef<string | null>(null)
 
   // 停止按钮状态管理
   const [disabledStopButtons, setDisabledStopButtons] = useState<Set<string>>(new Set())
@@ -171,6 +177,110 @@ const InstanceManagerPage: React.FC = () => {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    const socket = io(config.serverUrl, {
+      auth: { token: localStorage.getItem('gsm3_token') }
+    })
+    steamUpdateSocketRef.current = socket
+    let disposed = false
+    let recoveryTimer: number | undefined
+
+    const isCurrentUpdate = (data: any) => {
+      if (!data?.updateId || data.instanceId !== steamUpdateInstanceIdRef.current) return false
+      if (!steamUpdateIdRef.current) steamUpdateIdRef.current = data.updateId
+      return data.updateId === steamUpdateIdRef.current
+    }
+
+    const clearCurrentUpdate = () => {
+      setSteamUpdating(false)
+      steamUpdateIdRef.current = null
+      steamUpdateInstanceIdRef.current = null
+      setSteamUpdatePassword('')
+      setSteamUpdateBranchPassword('')
+    }
+
+    const handleUpdateComplete = (data: any) => {
+      clearCurrentUpdate()
+      addNotification({
+        type: 'success',
+        title: '更新完成',
+        message: `Steam服务端已更新到 ${data.requestedBranch || '指定'} 分支`
+      })
+      void fetchInstances()
+    }
+
+    const handleUpdateError = (data: any) => {
+      clearCurrentUpdate()
+      addNotification({
+        type: 'error',
+        title: '更新失败',
+        message: data.error || 'Steam服务端更新失败'
+      })
+    }
+
+    const recoverCurrentUpdate = async (attempt = 0): Promise<void> => {
+      const updateId = steamUpdateIdRef.current
+      const instanceId = steamUpdateInstanceIdRef.current
+      if (!updateId || !instanceId || disposed) return
+
+      try {
+        const response = await apiClient.getSteamUpdateStatus(updateId)
+        if (
+          disposed
+          || updateId !== steamUpdateIdRef.current
+          || instanceId !== steamUpdateInstanceIdRef.current
+        ) return
+
+        if (response.data?.status === 'completed') {
+          handleUpdateComplete(response.data)
+        } else if (response.data?.status === 'failed') {
+          handleUpdateError(response.data)
+        }
+      } catch (error) {
+        if (disposed || updateId !== steamUpdateIdRef.current) return
+        if (attempt < 2) {
+          recoveryTimer = window.setTimeout(() => {
+            void recoverCurrentUpdate(attempt + 1)
+          }, 1000)
+          return
+        }
+
+        console.warn('恢复Steam更新状态失败:', error)
+        clearCurrentUpdate()
+        addNotification({
+          type: 'warning',
+          title: '更新状态未知',
+          message: '实时连接已恢复，但无法确认后台更新结果，请刷新实例状态后再操作'
+        })
+      }
+    }
+
+    socket.on('connect', () => {
+      void recoverCurrentUpdate()
+    })
+
+    socket.on('steam-update-log', (data: any) => {
+      if (!isCurrentUpdate(data)) return
+      const message = typeof data.message === 'string' ? data.message : JSON.stringify(data.message)
+      setSteamUpdateLogs(previous => [...previous, message].slice(-500))
+    })
+    socket.on('steam-update-complete', (data: any) => {
+      if (!isCurrentUpdate(data)) return
+      handleUpdateComplete(data)
+    })
+    socket.on('steam-update-error', (data: any) => {
+      if (!isCurrentUpdate(data)) return
+      handleUpdateError(data)
+    })
+
+    return () => {
+      disposed = true
+      if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer)
+      socket.disconnect()
+      steamUpdateSocketRef.current = null
+    }
+  }, [])
 
   // 获取可用配置列表
   const fetchAvailableConfigs = async () => {
@@ -767,6 +877,36 @@ const InstanceManagerPage: React.FC = () => {
     }
   }
 
+  const waitForSteamUpdateSocket = async (): Promise<void> => {
+    const socket = steamUpdateSocketRef.current
+    if (!socket) throw new Error('实时通信尚未初始化')
+    if (socket.connected) return
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup()
+        reject(new Error('实时通信连接超时'))
+      }, 10000)
+      const cleanup = () => {
+        clearTimeout(timeout)
+        socket.off('connect', handleConnect)
+        socket.off('connect_error', handleError)
+      }
+      const handleConnect = () => {
+        cleanup()
+        resolve()
+      }
+      const handleError = () => {
+        cleanup()
+        reject(new Error('实时通信连接失败'))
+      }
+
+      socket.on('connect', handleConnect)
+      socket.on('connect_error', handleError)
+      socket.connect()
+    })
+  }
+
   const handleOpenSteamUpdateModal = async (instance: Instance) => {
     if (!instance.steam?.appId) return
 
@@ -779,6 +919,9 @@ const InstanceManagerPage: React.FC = () => {
     setSteamUpdateUseAnonymous(true)
     setSteamUpdateUsername('')
     setSteamUpdatePassword('')
+    setSteamUpdateLogs([])
+    steamUpdateIdRef.current = null
+    steamUpdateInstanceIdRef.current = null
     requestAnimationFrame(() => {
       requestAnimationFrame(() => setSteamUpdateModalAnimating(true))
     })
@@ -799,19 +942,14 @@ const InstanceManagerPage: React.FC = () => {
       setSteamUpdateUseAnonymous(true)
       setSteamUpdateUsername('')
       setSteamUpdatePassword('')
+      setSteamUpdateLogs([])
+      steamUpdateIdRef.current = null
+      steamUpdateInstanceIdRef.current = null
     }, 300)
   }
 
   const handleUpdateSteamServer = async () => {
     if (!steamUpdateInstance) return
-    if (steamUpdateLoadingBranches) {
-      addNotification({
-        type: 'warning',
-        title: '正在发现分支',
-        message: '请等待Steam分支发现完成后再开始更新'
-      })
-      return
-    }
 
     if (!steamUpdateUseAnonymous && (!steamUpdateUsername.trim() || !steamUpdatePassword)) {
       addNotification({
@@ -844,6 +982,9 @@ const InstanceManagerPage: React.FC = () => {
 
     try {
       setSteamUpdating(true)
+      setSteamUpdateLogs([])
+      steamUpdateInstanceIdRef.current = steamUpdateInstance.id
+      await waitForSteamUpdateSocket()
       const response = await apiClient.updateSteamInstance({
         instanceId: steamUpdateInstance.id,
         branch: requestedBranch,
@@ -854,26 +995,25 @@ const InstanceManagerPage: React.FC = () => {
         steamPassword: steamUpdateUseAnonymous ? undefined : steamUpdatePassword
       })
 
-      if (!response.success || !response.data?.instance) {
-        throw new Error(response.message || '服务端更新失败')
+      if (!response.success || !response.data?.updateId) {
+        throw new Error(response.message || '无法启动服务端更新')
       }
-
+      steamUpdateIdRef.current = response.data.updateId
       addNotification({
-        type: 'success',
-        title: '更新完成',
-        message: `实例 "${steamUpdateInstance.name}" 已更新到 ${requestedBranch} 分支`
+        type: 'info',
+        title: '更新已开始',
+        message: `正在更新实例 "${steamUpdateInstance.name}"`
       })
-      handleCloseSteamUpdateModal()
-      await fetchInstances()
     } catch (error: any) {
       console.error('更新Steam实例失败:', error)
+      setSteamUpdating(false)
+      steamUpdateIdRef.current = null
+      steamUpdateInstanceIdRef.current = null
       addNotification({
         type: 'error',
         title: '更新失败',
         message: error.message || error.error || '无法开始Steam服务端更新'
       })
-    } finally {
-      setSteamUpdating(false)
     }
   }
 
@@ -1199,13 +1339,26 @@ const InstanceManagerPage: React.FC = () => {
   }
 
   // 打开文件目录
-  const handleOpenDirectory = (instance: Instance) => {
-    navigate(`/files?path=${encodeURIComponent(instance.workingDirectory)}`)
-    addNotification({
-      type: 'success',
-      title: '跳转成功',
-      message: `已打开 "${instance.name}" 的工作目录`
-    })
+  const handleOpenDirectory = async (instance: Instance) => {
+    try {
+      const response = await apiClient.resolveFilePath(instance.workingDirectory)
+      const targetPath = response.data?.resolvedPath || instance.workingDirectory
+      navigate(`/files?path=${encodeURIComponent(targetPath)}`)
+      addNotification({
+        type: response.data?.exists === false ? 'warning' : 'success',
+        title: response.data?.exists === false ? '路径不存在' : '跳转成功',
+        message: response.data?.exists === false
+          ? `已跳转到解析后的路径，但目录不存在：${targetPath}`
+          : `已打开 "${instance.name}" 的工作目录`
+      })
+    } catch (error: any) {
+      navigate(`/files?path=${encodeURIComponent(instance.workingDirectory)}`)
+      addNotification({
+        type: 'warning',
+        title: '路径解析失败',
+        message: error.message || '已使用原始工作目录跳转'
+      })
+    }
   }
 
   // 重置表单
@@ -2798,6 +2951,18 @@ const InstanceManagerPage: React.FC = () => {
               <div className="rounded-lg border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-800 dark:text-yellow-200">
                 更新会修改工作目录中的服务端文件，请确认实例已停止并提前备份重要存档。
               </div>
+
+              {(steamUpdating || steamUpdateLogs.length > 0) && (
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">实时输出</div>
+                  <pre
+                    aria-live="polite"
+                    className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-gray-950 p-3 text-xs text-gray-100 dark:border-gray-600"
+                  >
+                    {steamUpdateLogs.join('') || '正在启动 SteamCMD...'}
+                  </pre>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 dark:border-gray-700">
@@ -2806,11 +2971,11 @@ const InstanceManagerPage: React.FC = () => {
                 disabled={steamUpdating}
                 className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors"
               >
-                取消
+                关闭
               </button>
               <button
                 onClick={handleUpdateSteamServer}
-                disabled={steamUpdating || steamUpdateLoadingBranches || !steamUpdateBranch.trim() || (!steamUpdateUseAnonymous && (!steamUpdateUsername.trim() || !steamUpdatePassword)) || Boolean(steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch.trim())?.requiresPassword && !steamUpdateBranchPassword.trim())}
+                disabled={steamUpdating || !steamUpdateBranch.trim() || (!steamUpdateUseAnonymous && (!steamUpdateUsername.trim() || !steamUpdatePassword)) || Boolean(steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch.trim())?.requiresPassword && !steamUpdateBranchPassword.trim())}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white rounded-lg transition-colors flex items-center space-x-2"
               >
                 {steamUpdating ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}

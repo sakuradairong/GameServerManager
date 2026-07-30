@@ -55,8 +55,14 @@ export interface CreateInstanceRequest {
   steam?: SteamInstanceConfig
 }
 
+export interface InstanceOperationLockRequest {
+  token: string
+  reason: string
+}
+
 export class InstanceManager extends EventEmitter {
   private instances: Map<string, Instance> = new Map()
+  private operationLocks: Map<string, { token: string; reason: string }> = new Map()
   private configPath: string
   private saveTimeout: NodeJS.Timeout | null = null
   private logger: any
@@ -395,8 +401,38 @@ export class InstanceManager extends EventEmitter {
     return this.instances.get(id)
   }
 
+  public acquireOperationLock(id: string, token: string, reason: string): boolean {
+    if (!this.instances.has(id) || this.operationLocks.has(id)) {
+      return false
+    }
+
+    this.operationLocks.set(id, { token, reason })
+    return true
+  }
+
+  public releaseOperationLock(id: string, token: string): void {
+    const lock = this.operationLocks.get(id)
+    if (lock?.token === token) {
+      this.operationLocks.delete(id)
+    }
+  }
+
+  public getOperationLockReason(id: string): string | undefined {
+    return this.operationLocks.get(id)?.reason
+  }
+
+  private assertOperationLockOwner(id: string, operationToken?: string): void {
+    const lock = this.operationLocks.get(id)
+    if (lock && lock.token !== operationToken) {
+      throw new Error(`实例正在${lock.reason}，请等待操作完成后再修改`)
+    }
+  }
+
   // 创建实例
-  public async createInstance(data: CreateInstanceRequest): Promise<Instance> {
+  public async createInstance(
+    data: CreateInstanceRequest,
+    operationLock?: InstanceOperationLockRequest
+  ): Promise<Instance> {
     const id = uuidv4()
     const instance: Instance = {
       id,
@@ -406,7 +442,16 @@ export class InstanceManager extends EventEmitter {
     }
     
     this.instances.set(id, instance)
-    await this.saveInstances()
+    if (operationLock) {
+      this.operationLocks.set(id, operationLock)
+    }
+    try {
+      await this.saveInstances()
+    } catch (error) {
+      this.instances.delete(id)
+      if (operationLock) this.releaseOperationLock(id, operationLock.token)
+      throw error
+    }
     
     this.logger.info(`创建实例: ${instance.name} (${id})`)
     this.emit('instance-created', instance)
@@ -415,11 +460,16 @@ export class InstanceManager extends EventEmitter {
   }
 
   // 更新实例
-  public async updateInstance(id: string, data: CreateInstanceRequest): Promise<Instance | null> {
+  public async updateInstance(
+    id: string,
+    data: CreateInstanceRequest,
+    operationToken?: string
+  ): Promise<Instance | null> {
     const instance = this.instances.get(id)
     if (!instance) {
       return null
     }
+    this.assertOperationLockOwner(id, operationToken)
     
     // 如果实例正在运行，不允许修改某些关键配置
     if (instance.status === 'running') {
@@ -441,11 +491,12 @@ export class InstanceManager extends EventEmitter {
   }
 
   // 删除实例
-  public async deleteInstance(id: string): Promise<boolean> {
+  public async deleteInstance(id: string, operationToken?: string): Promise<boolean> {
     const instance = this.instances.get(id)
     if (!instance) {
       return false
     }
+    this.assertOperationLockOwner(id, operationToken)
     
     // 如果实例正在运行，先停止它
     if (instance.status === 'running') {
@@ -466,6 +517,11 @@ export class InstanceManager extends EventEmitter {
     const instance = this.instances.get(id)
     if (!instance) {
       throw new Error('实例不存在')
+    }
+
+    const operationLock = this.operationLocks.get(id)
+    if (operationLock) {
+      throw new Error(`实例正在${operationLock.reason}，请等待操作完成后再启动`)
     }
     
     if (instance.status === 'running') {

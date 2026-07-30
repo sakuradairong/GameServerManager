@@ -421,6 +421,16 @@ class ApiClient {
     return this.get('/files', { params: { path } })
   }
 
+  async resolveFilePath(path: string) {
+    return this.get<{
+      originalPath: string
+      resolvedPath: string
+      isAbsolute: boolean
+      exists: boolean
+      type?: 'file' | 'directory'
+    }>('/files/resolve-path', { params: { path } })
+  }
+
   async uploadFile(file: File, path: string) {
     const formData = new FormData()
     formData.append('file', file)
@@ -542,7 +552,18 @@ class ApiClient {
     steamUsername?: string
     steamPassword?: string
   }) {
-    return this.post<{ instance: Instance; requestedBranch: string; output?: string }>('/game-deployment/steam/update', data)
+    return this.post<{ updateId: string; instanceId: string; requestedBranch: string }>('/game-deployment/steam/update', data)
+  }
+
+  async getSteamUpdateStatus(updateId: string) {
+    return this.get<{
+      updateId: string
+      instanceId: string
+      requestedBranch: string
+      status: 'running' | 'completed' | 'failed'
+      error?: string
+      updatedAt: string
+    }>(`/game-deployment/steam/update/${encodeURIComponent(updateId)}`)
   }
 
   // 定时任务API

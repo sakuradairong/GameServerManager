@@ -5,11 +5,13 @@ import { createWriteStream } from 'fs'
 import * as tar from 'tar'
 import winston from 'winston'
 import os from 'os'
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { spawn } from 'child_process'
 import { parse as parseVdf } from 'vdf-parser'
 import { ConfigManager } from '../config/ConfigManager.js'
 import { createTarSecurityFilter } from '../../utils/tarSecurityFilter.js'
 import { zipToolsManager } from '../../utils/zipToolsManager.js'
+import { StreamingRedactor } from '../../utils/streamingRedactor.js'
+import { createSteamCMDRunScript, prepareSteamCMDLaunch } from '../../utils/steamcmdRunScript.js'
 
 export interface SteamCMDInstallOptions {
   installPath: string
@@ -37,6 +39,10 @@ export interface SteamBranchQueryOptions {
   forceRefresh?: boolean
   steamUsername?: string
   steamPassword?: string
+}
+
+function quoteSteamCMDConsoleArgument(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`
 }
 
 export class SteamCMDManager {
@@ -394,34 +400,34 @@ export class SteamCMDManager {
       throw new Error('SteamCMD未配置')
     }
 
-    const loginArguments = credentials
-      ? ['+login', credentials.username, credentials.password]
-      : ['+login', 'anonymous']
+    const loginCommand = credentials
+      ? `login ${quoteSteamCMDConsoleArgument(credentials.username)} ${quoteSteamCMDConsoleArgument(credentials.password)}`
+      : 'login anonymous'
     const attempts = [
       [
-        ...loginArguments,
-        '+app_info_request', appId,
-        ...loginArguments,
-        '+app_info_update', '1',
-        '+app_info_print', appId, 'depots',
-        '+logoff',
-        '+quit'
+        loginCommand,
+        `app_info_request ${appId}`,
+        loginCommand,
+        'app_info_update 1',
+        `app_info_print ${appId} depots`,
+        'logoff',
+        'quit'
       ],
       [
-        ...loginArguments,
-        '+app_info_request', appId,
-        ...loginArguments,
-        '+app_info_print', appId,
-        '+app_info_print', appId,
-        '+logoff',
-        '+quit'
+        loginCommand,
+        `app_info_request ${appId}`,
+        loginCommand,
+        `app_info_print ${appId}`,
+        `app_info_print ${appId}`,
+        'logoff',
+        'quit'
       ],
       [
-        ...loginArguments,
-        '+app_info_update', '1',
-        '+app_info_print', appId,
-        '+logoff',
-        '+quit'
+        loginCommand,
+        'app_info_update 1',
+        `app_info_print ${appId}`,
+        'logoff',
+        'quit'
       ]
     ]
 
@@ -430,7 +436,11 @@ export class SteamCMDManager {
         if (attempt > 0) {
           await new Promise(resolve => setTimeout(resolve, attempt * 750))
         }
-        const output = await this.runSteamCMDForOutput(executablePath, attempts[attempt])
+        const output = await this.runSteamCMDForOutput(
+          executablePath,
+          attempts[attempt],
+          credentials?.password ? [credentials.password] : []
+        )
 
         const branches = this.parseAppBranches(output, appId)
         if (branches.length > 0) {
@@ -450,97 +460,113 @@ export class SteamCMDManager {
     throw new Error('未获取到Steam分支信息，部分游戏可能需要使用拥有该游戏的Steam账号查询')
   }
 
-  private async runSteamCMDForOutput(executablePath: string, args: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child: ChildProcessWithoutNullStreams = spawn(executablePath, args, {
-        cwd: path.dirname(executablePath),
-        shell: false,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
+  private async runSteamCMDForOutput(
+    executablePath: string,
+    commands: string[],
+    redactValues: string[] = []
+  ): Promise<string> {
+    const runScript = await createSteamCMDRunScript(commands)
+    try {
+      const workingDirectory = path.dirname(executablePath)
+      await prepareSteamCMDLaunch(executablePath)
+      return await new Promise((resolve, reject) => {
+        const child = spawn(executablePath, [
+          '-logdir', runScript.logDirectory,
+          '+runscript', runScript.filePath
+        ], {
+          cwd: workingDirectory,
+          shell: false,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
 
-      let stdout = ''
-      let stderr = ''
-      let settled = false
-      let stopCapturingOutput = false
-      let terminationError: Error | null = null
-      let forceKillTimer: ReturnType<typeof setTimeout> | null = null
-      const maxOutputLength = 10 * 1024 * 1024
+        let stdout = ''
+        let stderr = ''
+        let settled = false
+        let stopCapturingOutput = false
+        let terminationError: Error | null = null
+        let forceKillTimer: ReturnType<typeof setTimeout> | null = null
+        const maxOutputLength = 10 * 1024 * 1024
+        const stdoutRedactor = new StreamingRedactor(redactValues)
+        const stderrRedactor = new StreamingRedactor(redactValues)
 
-      const terminateAndWait = (error: Error) => {
-        if (settled || terminationError) return
+        const terminateAndWait = (error: Error) => {
+          if (settled || terminationError) return
 
-        terminationError = error
-        stopCapturingOutput = true
-        clearTimeout(timeout)
+          terminationError = error
+          stopCapturingOutput = true
+          clearTimeout(timeout)
 
-        try {
-          child.kill()
-        } catch {
-          // The forced termination below remains the final fallback.
-        }
-
-        forceKillTimer = setTimeout(() => {
-          if (settled) return
           try {
-            child.kill('SIGKILL')
+            child.kill()
           } catch {
-            // Keep waiting for close so the serialized queue cannot overlap processes.
+            // The forced termination below remains the final fallback.
           }
-        }, 5000)
-      }
 
-      const appendOutput = (target: 'stdout' | 'stderr', data: Buffer) => {
-        if (settled || stopCapturingOutput) return
-
-        const output = data.toString()
-        if (stdout.length + stderr.length + output.length > maxOutputLength) {
-          terminateAndWait(new Error('Steam分支查询输出过大'))
-          return
+          forceKillTimer = setTimeout(() => {
+            if (settled) return
+            try {
+              child.kill('SIGKILL')
+            } catch {
+              // Keep waiting for close so the serialized queue cannot overlap processes.
+            }
+          }, 5000)
         }
 
-        if (target === 'stdout') stdout += output
-        else stderr += output
-      }
+        const appendOutput = (target: 'stdout' | 'stderr', output: string) => {
+          if (settled || stopCapturingOutput || !output) return
+          if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) + Buffer.byteLength(output) > maxOutputLength) {
+            terminateAndWait(new Error('Steam分支查询输出过大'))
+            return
+          }
 
-      const timeout = setTimeout(() => {
-        terminateAndWait(new Error('查询Steam分支超时'))
-      }, 60000)
-
-      child.stdout.on('data', (data: Buffer) => {
-        appendOutput('stdout', data)
-      })
-
-      child.stderr.on('data', (data: Buffer) => {
-        appendOutput('stderr', data)
-      })
-
-      child.on('error', (error) => {
-        if (settled) return
-        terminateAndWait(error)
-      })
-
-      child.on('close', (code, signal) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        if (forceKillTimer) clearTimeout(forceKillTimer)
-
-        if (terminationError) {
-          reject(terminationError)
-          return
+          if (target === 'stdout') stdout += output
+          else stderr += output
         }
 
-        const output = [stdout, stderr].filter(value => value.trim()).join('\n')
-        if (code !== 0 || signal) {
-          const detail = stderr.trim().slice(-2000)
-          reject(new Error(detail || `SteamCMD退出码: ${code ?? 'unknown'}${signal ? `，信号: ${signal}` : ''}`))
-          return
-        }
+        const timeout = setTimeout(() => {
+          terminateAndWait(new Error('查询Steam分支超时'))
+        }, 60000)
 
-        resolve(output)
+        child.stdout.on('data', (data: Buffer) => {
+          appendOutput('stdout', stdoutRedactor.write(data))
+        })
+        child.stdout.once('end', () => appendOutput('stdout', stdoutRedactor.end()))
+
+        child.stderr.on('data', (data: Buffer) => {
+          appendOutput('stderr', stderrRedactor.write(data))
+        })
+        child.stderr.once('end', () => appendOutput('stderr', stderrRedactor.end()))
+
+        child.on('error', (error) => {
+          if (settled) return
+          terminateAndWait(error)
+        })
+
+        child.on('close', (code, signal) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timeout)
+          if (forceKillTimer) clearTimeout(forceKillTimer)
+
+          if (terminationError) {
+            reject(terminationError)
+            return
+          }
+
+          const output = [stdout, stderr].filter(value => value.trim()).join('\n')
+          if (code !== 0 || signal) {
+            const detail = stderr.trim().slice(-2000)
+            reject(new Error(detail || `SteamCMD退出码: ${code ?? 'unknown'}${signal ? `，信号: ${signal}` : ''}`))
+            return
+          }
+
+          resolve(output)
+        })
       })
-    })
+    } finally {
+      await runScript.cleanup()
+    }
   }
 
   private parseAppBranches(output: string, appId: string): SteamBranchInfo[] {

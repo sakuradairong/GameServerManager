@@ -502,13 +502,13 @@ const PluginsPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center space-x-1">
-                {plugin.enabled ? (
-                  <div className="w-2 h-2 bg-green-500 rounded-full" title="已启用" />
-                ) : (
-                  <div className="w-2 h-2 bg-gray-400 rounded-full" title="已禁用" />
-                )}
-              </div>
+              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                plugin.enabled
+                  ? 'bg-green-500/20 text-green-700 dark:text-green-300'
+                  : 'bg-gray-500/20 text-gray-600 dark:text-gray-300'
+              }`}>
+                {plugin.enabled ? '已启用' : '已禁用'}
+              </span>
             </div>
 
             {/* 插件信息 */}
@@ -534,10 +534,10 @@ const PluginsPage: React.FC = () => {
             <div className="flex items-center justify-between pt-4 border-t border-white/10 dark:border-gray-700/30">
               <div className="flex items-center space-x-2">
                 <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => handleTogglePlugin(plugin)}
-                  className={`p-2 rounded-lg transition-colors ${
+                  className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     plugin.enabled
                       ? 'bg-green-500/20 text-green-600 hover:bg-green-500/30'
                       : 'bg-gray-500/20 text-gray-600 hover:bg-gray-500/30'
@@ -545,16 +545,23 @@ const PluginsPage: React.FC = () => {
                   title={plugin.enabled ? '禁用插件' : '启用插件'}
                 >
                   {plugin.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+                  <span>{plugin.enabled ? '禁用' : '启用'}</span>
                 </motion.button>
-                {plugin.hasWebInterface && plugin.enabled && (
+                {plugin.hasWebInterface && (
                   <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
+                    whileHover={{ scale: plugin.enabled ? 1.02 : 1 }}
+                    whileTap={{ scale: plugin.enabled ? 0.98 : 1 }}
                     onClick={() => handleOpenPlugin(plugin)}
-                    className="p-2 bg-blue-500/20 text-blue-600 rounded-lg hover:bg-blue-500/30 transition-colors"
-                    title="打开插件"
+                    disabled={!plugin.enabled}
+                    className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      plugin.enabled
+                        ? 'bg-blue-500/20 text-blue-600 hover:bg-blue-500/30'
+                        : 'bg-gray-500/10 text-gray-400 cursor-not-allowed'
+                    }`}
+                    title={plugin.enabled ? '打开插件' : '启用后可打开插件'}
                   >
                     <ExternalLink className="w-4 h-4" />
+                    <span>打开</span>
                   </motion.button>
                 )}
               </div>
@@ -625,7 +632,7 @@ const PluginsPage: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm"
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2 backdrop-blur-sm sm:p-4 lg:left-[var(--gsm-sidebar-offset,16rem)]"
             onClick={() => {
               setShowPluginModal(false)
               setCurrentPluginContent('')
@@ -637,11 +644,11 @@ const PluginsPage: React.FC = () => {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               transition={{ duration: 0.3, ease: "easeOut" }}
-              className="glass rounded-lg w-[90vw] h-[90vh] flex flex-col mx-4 border border-white/20 dark:border-gray-700/30"
+              className="glass flex h-[calc(100vh-1rem)] w-full max-w-[1600px] flex-col overflow-hidden rounded-lg border border-white/20 dark:border-gray-700/30 sm:h-[92vh]"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-between items-center p-4 border-b border-white/10 dark:border-gray-700/30">
-                <h2 className="text-xl font-bold text-black dark:text-white">{currentPluginName}</h2>
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 p-3 dark:border-gray-700/30 sm:p-4">
+                <h2 className="min-w-0 truncate text-lg font-bold text-black dark:text-white sm:text-xl">{currentPluginName}</h2>
                 <motion.button
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
@@ -655,13 +662,13 @@ const PluginsPage: React.FC = () => {
                   <X className="w-6 h-6" />
                 </motion.button>
               </div>
-              <div className="flex-1 p-4">
+              <div className="min-h-0 flex-1 p-2 sm:p-4">
                 <motion.iframe
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.4, delay: 0.2 }}
                   srcDoc={currentPluginContent}
-                  className="w-full h-full border-0 rounded-lg bg-white dark:bg-gray-900"
+                  className="h-full w-full rounded-md border-0 bg-white dark:bg-gray-900 sm:rounded-lg"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   title={currentPluginName}
                 />
@@ -679,7 +686,7 @@ const PluginsPage: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2 backdrop-blur-sm sm:p-4 lg:left-[var(--gsm-sidebar-offset,16rem)]"
             onClick={() => setShowCreateModal(false)}
           >
             <motion.div

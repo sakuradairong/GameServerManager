@@ -382,6 +382,14 @@ router.put('/:id', authenticateToken, async (req: Request, res: Response) => {
         message: '请先停止实例再进行修改'
       })
     }
+
+    if (typeof error.message === 'string' && error.message.startsWith('实例正在')) {
+      return res.status(409).json({
+        success: false,
+        error: '实例正在执行其他操作',
+        message: error.message
+      })
+    }
     
     res.status(500).json({
       success: false,
@@ -419,6 +427,13 @@ router.delete('/:id', authenticateToken, async (req: Request, res: Response) => 
     })
   } catch (error: any) {
     logger.error('删除实例失败:', error)
+    if (typeof error.message === 'string' && error.message.startsWith('实例正在')) {
+      return res.status(409).json({
+        success: false,
+        error: '实例正在执行其他操作',
+        message: error.message
+      })
+    }
     res.status(500).json({
       success: false,
       error: '删除实例失败',

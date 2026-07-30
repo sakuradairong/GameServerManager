@@ -6,18 +6,47 @@ import os from 'os'
 import axios from 'axios'
 import http from 'http'
 import { fileURLToPath } from 'url'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { Server as SocketIOServer } from 'socket.io'
 import { TerminalManager } from '../modules/terminal/TerminalManager.js'
 import { InstanceManager } from '../modules/instance/InstanceManager.js'
 import { SteamCMDManager, type SteamBranchQueryOptions } from '../modules/steamcmd/SteamCMDManager.js'
 import { ConfigManager } from '../modules/config/ConfigManager.js'
 import logger from '../utils/logger.js'
-import { authenticateToken } from '../middleware/auth.js'
+import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
+import {
+  createSteamCMDRunScript,
+  prepareSteamCMDLaunch,
+  type SteamCMDRunScript
+} from '../utils/steamcmdRunScript.js'
+
+const execFileAsync = promisify(execFile)
 
 // 平台枚举
 enum Platform {
   Windows = 'Windows',
   Linux = 'Linux',
   MacOS = 'MacOS'
+}
+
+type StartCommandConfig = string | Partial<Record<Platform, string>>
+
+interface LinuxSteamCMDRuntimeIssue {
+  message: string
+  fixCommands: string[]
+  missingLibraries?: string[]
+}
+
+interface LinuxSteamCMDFixHint {
+  message: string
+  fixCommands: string[]
+}
+
+interface LinuxOsRelease {
+  id?: string
+  idLike: string[]
+  name?: string
 }
 
 // 游戏信息接口
@@ -29,6 +58,8 @@ interface SteamGameInfo {
   url: string
   system?: Platform[]
   system_info?: Platform[]  // 面板兼容的系统列表
+  login_anonymous?: boolean
+  start_command?: StartCommandConfig
 }
 
 function normalizeSteamBranch(branch?: string): string {
@@ -36,30 +67,26 @@ function normalizeSteamBranch(branch?: string): string {
   return normalizedBranch || 'public'
 }
 
-function getSteamUpdateArguments(appId: string, branch?: string, betaPassword?: string, validate?: boolean): string[] {
+function quoteSteamCMDConsoleArgument(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`
+}
+
+function getSteamUpdateCommand(appId: string, branch?: string, betaPassword?: string, validate?: boolean): string {
   const normalizedBranch = normalizeSteamBranch(branch)
-  const args = ['+app_update', appId]
+  let command = `app_update ${appId}`
 
   if (normalizedBranch !== 'public') {
-    args.push('-beta', normalizedBranch)
+    command += ` -beta ${quoteSteamCMDConsoleArgument(normalizedBranch)}`
     if (betaPassword?.trim()) {
-      args.push('-betapassword', betaPassword.trim())
+      command += ` -betapassword ${quoteSteamCMDConsoleArgument(betaPassword.trim())}`
     }
   }
 
   if (validate) {
-    args.push('validate')
+    command += ' validate'
   }
 
-  return args
-}
-
-function quoteSteamCMDArgument(value: string): string {
-  if (os.platform() === 'win32') {
-    return `'${value.replace(/'/g, "''")}'`
-  }
-
-  return `'${value.replace(/'/g, `'"'"'`)}'`
+  return command
 }
 
 function appendLaunchArguments(command: string, launchArgs: string): string {
@@ -122,29 +149,428 @@ function isPanelCompatibleOnCurrentPlatform(game: SteamGameInfo): boolean {
   return game.system_info.includes(currentPlatform)
 }
 
+function getInstallGamePaths(): string[] {
+  const baseDir = process.cwd()
+  return [
+    path.join(baseDir, 'data', 'games', 'installgame.json'),           // 打包后的路径
+    path.join(baseDir, 'server', 'data', 'games', 'installgame.json'), // 开发环境路径
+  ]
+}
+
+async function getInstallGameFilePath(): Promise<string | null> {
+  for (const possiblePath of getInstallGamePaths()) {
+    try {
+      await fs.access(possiblePath)
+      return possiblePath
+    } catch {
+      // 继续尝试下一个路径
+    }
+  }
+
+  return null
+}
+
+async function getInstallGameInfo(gameKey: string): Promise<SteamGameInfo | null> {
+  const gamesFilePath = await getInstallGameFilePath()
+  if (!gamesFilePath) {
+    return null
+  }
+
+  const gamesData = await fs.readFile(gamesFilePath, 'utf-8')
+  const allGames: { [key: string]: SteamGameInfo } = JSON.parse(gamesData)
+  return allGames[gameKey] || null
+}
+
+function resolvePlatformStartCommand(startCommand?: StartCommandConfig): string | null {
+  if (!startCommand) {
+    return null
+  }
+
+  if (typeof startCommand === 'string') {
+    return startCommand.trim() || null
+  }
+
+  const currentPlatform = getCurrentPlatform()
+  return (
+    startCommand[currentPlatform] ||
+    startCommand[Platform.Linux] ||
+    startCommand[Platform.Windows] ||
+    startCommand[Platform.MacOS] ||
+    null
+  )
+}
+
+async function getLocalStartCommandForGame(gameKey: string): Promise<string | null> {
+  const gameInfo = await getInstallGameInfo(gameKey)
+  return resolvePlatformStartCommand(gameInfo?.start_command)
+}
+
+function normalizeSteamCMDArguments(command: string): string {
+  return command
+    .trim()
+    .replace(/^(?:"[^"]*[\\/]?steamcmd(?:\.exe|\.sh)?"|(?:[a-z]:)?[^\s"]*[\\/]steamcmd(?:\.exe|\.sh)?|steamcmd(?:\.exe|\.sh)?)(?:\s+|$)/i, '')
+    .trim()
+}
+
+function getSteamCMDTokenValue(token: string): string {
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    return token.slice(1, -1)
+  }
+
+  return token
+}
+
+function redactSteamCMDCredentials(command: string): string {
+  const tokens = command.match(/"[^"]*"|'(?:''|[^'])*'|\S+/g)
+  if (!tokens) {
+    return command
+  }
+
+  const redactedTokens = [...tokens]
+
+  for (let index = 0; index < redactedTokens.length; index++) {
+    const tokenValue = getSteamCMDTokenValue(redactedTokens[index]).toLowerCase()
+    if (tokenValue !== 'login' && tokenValue !== '+login') {
+      continue
+    }
+
+    const usernameToken = redactedTokens[index + 1]
+    const passwordToken = redactedTokens[index + 2]
+    if (!usernameToken || !passwordToken) {
+      continue
+    }
+
+    const username = getSteamCMDTokenValue(usernameToken).toLowerCase()
+    if (username === 'anonymous' || passwordToken.startsWith('+')) {
+      continue
+    }
+
+    redactedTokens[index + 2] = '******'
+
+    const steamGuardToken = redactedTokens[index + 3]
+    if (steamGuardToken && !steamGuardToken.startsWith('+')) {
+      redactedTokens[index + 3] = '******'
+    }
+  }
+
+  return redactedTokens.join(' ')
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function parseOsReleaseValue(value: string): string {
+  const trimmed = value.trim()
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).replace(/\\(["'\\$`])/g, '$1')
+  }
+
+  return trimmed
+}
+
+async function readLinuxOsRelease(): Promise<LinuxOsRelease> {
+  try {
+    const osRelease = await fs.readFile('/etc/os-release', 'utf-8')
+    const values: Record<string, string> = {}
+
+    for (const line of osRelease.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue
+      }
+
+      const separatorIndex = trimmed.indexOf('=')
+      if (separatorIndex === -1) {
+        continue
+      }
+
+      const key = trimmed.slice(0, separatorIndex)
+      const value = parseOsReleaseValue(trimmed.slice(separatorIndex + 1))
+      values[key] = value
+    }
+
+    return {
+      id: values.ID?.toLowerCase(),
+      idLike: values.ID_LIKE?.toLowerCase().split(/\s+/).filter(Boolean) || [],
+      name: values.NAME
+    }
+  } catch {
+    return { idLike: [] }
+  }
+}
+
+async function commandExists(command: string): Promise<boolean> {
+  try {
+    await execFileAsync('sh', ['-lc', `command -v ${command} >/dev/null 2>&1`], {
+      timeout: 3000,
+      maxBuffer: 1024
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function getLinuxSteamCMDFixHint(): Promise<LinuxSteamCMDFixHint> {
+  const osRelease = await readLinuxOsRelease()
+  const distroIds = new Set([osRelease.id, ...osRelease.idLike].filter(Boolean) as string[])
+  const hasDistro = (...ids: string[]) => ids.some(id => distroIds.has(id))
+
+  if (hasDistro('debian', 'ubuntu', 'linuxmint', 'pop', 'raspbian')) {
+    return {
+      message: '检测到 Debian/Ubuntu 系统，可使用下方命令安装 SteamCMD 需要的 i386 运行时依赖后重试。',
+      fixCommands: [
+        'dpkg --add-architecture i386',
+        'apt-get update',
+        'apt-get install -y libc6:i386 libstdc++6:i386 libgcc-s1:i386'
+      ]
+    }
+  }
+
+  if (hasDistro('fedora', 'rhel', 'centos', 'rocky', 'almalinux', 'ol')) {
+    return {
+      message: '检测到 Fedora/RHEL 系统，可使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'dnf install -y glibc.i686 libstdc++.i686 libgcc.i686'
+      ]
+    }
+  }
+
+  if (hasDistro('arch', 'manjaro')) {
+    return {
+      message: '检测到 Arch 系统，请确认已启用 multilib 仓库，然后使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'pacman -Syu --needed lib32-glibc lib32-gcc-libs'
+      ]
+    }
+  }
+
+  if (hasDistro('opensuse', 'suse', 'sles')) {
+    return {
+      message: '检测到 openSUSE/SUSE 系统，可使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'zypper --non-interactive install glibc-32bit libstdc++6-32bit libgcc_s1-32bit'
+      ]
+    }
+  }
+
+  if (hasDistro('alpine')) {
+    return {
+      message: '检测到 Alpine/musl 环境。SteamCMD 的 linux32 可执行文件依赖 glibc 32 位运行时，不建议在 Alpine 上直接运行；建议改用 Debian/Ubuntu/RHEL/openSUSE/Arch 等 glibc 发行版或容器环境。',
+      fixCommands: []
+    }
+  }
+
+  const [hasAptGet, hasDnf, hasYum, hasPacman, hasZypper, hasApk] = await Promise.all([
+    commandExists('apt-get'),
+    commandExists('dnf'),
+    commandExists('yum'),
+    commandExists('pacman'),
+    commandExists('zypper'),
+    commandExists('apk')
+  ])
+
+  if (hasAptGet) {
+    return {
+      message: '检测到 apt-get，可使用下方命令安装 SteamCMD 需要的 i386 运行时依赖后重试。',
+      fixCommands: [
+        'dpkg --add-architecture i386',
+        'apt-get update',
+        'apt-get install -y libc6:i386 libstdc++6:i386 libgcc-s1:i386'
+      ]
+    }
+  }
+
+  if (hasDnf) {
+    return {
+      message: '检测到 dnf，可使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'dnf install -y glibc.i686 libstdc++.i686 libgcc.i686'
+      ]
+    }
+  }
+
+  if (hasYum) {
+    return {
+      message: '检测到 yum，可使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'yum install -y glibc.i686 libstdc++.i686 libgcc.i686'
+      ]
+    }
+  }
+
+  if (hasPacman) {
+    return {
+      message: '检测到 pacman，请确认已启用 multilib 仓库，然后使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'pacman -Syu --needed lib32-glibc lib32-gcc-libs'
+      ]
+    }
+  }
+
+  if (hasZypper) {
+    return {
+      message: '检测到 zypper，可使用下方命令安装 SteamCMD 需要的 32 位运行时依赖后重试。',
+      fixCommands: [
+        'zypper --non-interactive install glibc-32bit libstdc++6-32bit libgcc_s1-32bit'
+      ]
+    }
+  }
+
+  if (hasApk) {
+    return {
+      message: '检测到 apk/Alpine 类环境。SteamCMD 的 linux32 可执行文件依赖 glibc 32 位运行时，不建议在该环境直接运行；建议改用 glibc 发行版或容器环境。',
+      fixCommands: []
+    }
+  }
+
+  return {
+    message: '未识别出可自动生成修复命令的发行版。请根据当前系统文档安装 32 位 glibc/ELF loader、libstdc++ 和 libgcc 运行库后重试。',
+    fixCommands: []
+  }
+}
+
+async function createLinuxSteamCMDRuntimeIssue(message: string, missingLibraries?: string[]): Promise<LinuxSteamCMDRuntimeIssue> {
+  const fixHint = await getLinuxSteamCMDFixHint()
+  const privilegeHint = fixHint.fixCommands.length > 0 ? ' 这些命令需要 root 权限；非 root 用户请逐条加 sudo 执行。' : ''
+  const issue: LinuxSteamCMDRuntimeIssue = {
+    message: `${message}${fixHint.message ? ` ${fixHint.message}` : ''}${privilegeHint}`,
+    fixCommands: fixHint.fixCommands
+  }
+
+  if (missingLibraries?.length) {
+    issue.missingLibraries = missingLibraries
+  }
+
+  return issue
+}
+
+async function checkLinuxSteamCMDRuntime(steamcmdDir: string): Promise<LinuxSteamCMDRuntimeIssue | null> {
+  if (getCurrentPlatform() !== Platform.Linux) {
+    return null
+  }
+
+  const linux32Steamcmd = path.join(steamcmdDir, 'linux32', 'steamcmd')
+  if (!(await pathExists(linux32Steamcmd))) {
+    return {
+      message: 'SteamCMD 安装目录缺少 linux32/steamcmd，当前 Linux SteamCMD 安装可能不完整。请在设置中重新下载/更新 SteamCMD 后重试。',
+      fixCommands: []
+    }
+  }
+
+  const loaderCandidates = [
+    '/lib/ld-linux.so.2',
+    '/lib32/ld-linux.so.2',
+    '/lib/i386-linux-gnu/ld-linux.so.2',
+    '/usr/lib/i386-linux-gnu/ld-linux.so.2'
+  ]
+
+  let has32BitLoader = false
+  for (const candidate of loaderCandidates) {
+    if (await pathExists(candidate)) {
+      has32BitLoader = true
+      break
+    }
+  }
+
+  if (!has32BitLoader) {
+    return createLinuxSteamCMDRuntimeIssue(
+      '当前 Linux 系统缺少 32 位 ELF loader，SteamCMD 会报 “linux32/steamcmd: cannot execute: required file not found”。'
+    )
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync('ldd', [linux32Steamcmd], {
+      timeout: 5000,
+      maxBuffer: 1024 * 1024
+    })
+    const lddOutput = `${stdout}\n${stderr}`
+    const missingLibraries = Array.from(
+      new Set(
+        lddOutput
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(line => line.includes('not found'))
+          .map(line => line.split(/\s+/)[0])
+          .filter(Boolean)
+      )
+    )
+
+    if (missingLibraries.length > 0) {
+      return createLinuxSteamCMDRuntimeIssue(
+        `SteamCMD 32 位运行库不完整，缺少：${missingLibraries.join(', ')}。`,
+        missingLibraries
+      )
+    }
+  } catch (error: any) {
+    logger.warn('SteamCMD Linux runtime ldd 检测失败，继续安装流程:', error.message)
+  }
+
+  return null
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const router = Router()
-const activeSteamUpdates = new Set<string>()
 
 // 管理器实例
 let terminalManager: TerminalManager
 let instanceManager: InstanceManager
 let steamcmdManager: SteamCMDManager
 let configManager: ConfigManager
+let io: SocketIOServer
+
+type SteamUpdateStatus = 'running' | 'completed' | 'failed'
+
+interface SteamUpdateTask {
+  updateId: string
+  userId: string
+  instanceId: string
+  requestedBranch: string
+  status: SteamUpdateStatus
+  error?: string
+  updatedAt: string
+}
+
+const steamUpdateTasks = new Map<string, SteamUpdateTask>()
+const STEAM_UPDATE_TASK_RETENTION_MS = 60 * 60 * 1000
+
+function finishSteamUpdateTask(updateId: string, status: Exclude<SteamUpdateStatus, 'running'>, error?: string) {
+  const task = steamUpdateTasks.get(updateId)
+  if (!task) return
+
+  task.status = status
+  task.error = error
+  task.updatedAt = new Date().toISOString()
+  const completedAt = task.updatedAt
+  const cleanupTimer = setTimeout(() => {
+    if (steamUpdateTasks.get(updateId)?.updatedAt === completedAt) {
+      steamUpdateTasks.delete(updateId)
+    }
+  }, STEAM_UPDATE_TASK_RETENTION_MS)
+  cleanupTimer.unref?.()
+}
 
 // 设置管理器实例
 export function setGameDeploymentManagers(
   terminal: TerminalManager,
   instance: InstanceManager,
   steamcmd: SteamCMDManager,
-  config: ConfigManager
+  config: ConfigManager,
+  socketIO: SocketIOServer
 ) {
   terminalManager = terminal
   instanceManager = instance
   steamcmdManager = steamcmd
   configManager = config
+  io = socketIO
 }
 
 async function respondWithSteamBranches(
@@ -413,17 +839,49 @@ router.post('/steam/branches/:appId', authenticateToken, async (req: Request, re
 })
 
 // 更新Steam实例服务端文件
-router.post('/steam/update', authenticateToken, async (req: Request, res: Response) => {
-  let lockedInstanceId: string | null = null
+router.get('/steam/update/:updateId', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
+  const task = steamUpdateTasks.get(req.params.updateId)
+  if (!task || task.userId !== req.user?.userId) {
+    return res.status(404).json({
+      success: false,
+      error: 'Steam更新任务不存在'
+    })
+  }
+
+  res.json({
+    success: true,
+    data: {
+      updateId: task.updateId,
+      instanceId: task.instanceId,
+      requestedBranch: task.requestedBranch,
+      status: task.status,
+      error: task.error,
+      updatedAt: task.updatedAt
+    }
+  })
+})
+
+router.post('/steam/update', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  let operationLock: { instanceId: string; token: string } | null = null
+  let updateTask: SteamUpdateTask | null = null
+  let updateRunScript: SteamCMDRunScript | null = null
+  let handedOff = false
   try {
-    const { instanceId, branch, betaPassword, validate, useAnonymous, steamUsername, steamPassword } = req.body
+    const {
+      instanceId,
+      branch,
+      betaPassword,
+      validate,
+      useAnonymous,
+      steamUsername,
+      steamPassword
+    } = req.body
     if (!instanceId || typeof instanceId !== 'string') {
       return res.status(400).json({
         success: false,
         error: '缺少实例ID'
       })
     }
-
     const instance = instanceManager.getInstance(instanceId)
     if (!instance) {
       return res.status(404).json({
@@ -468,14 +926,6 @@ router.post('/steam/update', authenticateToken, async (req: Request, res: Respon
         error: '请先停止实例再更新服务端'
       })
     }
-    if (activeSteamUpdates.has(instance.id)) {
-      return res.status(409).json({
-        success: false,
-        error: '该实例正在更新中'
-      })
-    }
-    activeSteamUpdates.add(instance.id)
-    lockedInstanceId = instance.id
 
     const steamcmdPath = await steamcmdManager.getSteamCMDExecutablePath()
     if (!steamcmdPath) {
@@ -483,14 +933,6 @@ router.post('/steam/update', authenticateToken, async (req: Request, res: Respon
         success: false,
         error: 'SteamCMD未配置',
         message: '请先在设置中配置SteamCMD路径'
-      })
-    }
-
-    const currentInstance = instanceManager.getInstance(instance.id)
-    if (!currentInstance || (currentInstance.status !== 'stopped' && currentInstance.status !== 'error')) {
-      return res.status(400).json({
-        success: false,
-        error: '请先停止实例再更新服务端'
       })
     }
 
@@ -519,91 +961,191 @@ router.post('/steam/update', authenticateToken, async (req: Request, res: Respon
 
     // 私有分支不会出现在公开AppInfo中，具体分支名和密码交由SteamCMD校验。
     const selectedBranch = requestedBranch
-    const steamLoginArguments = shouldUseAnonymous
-      ? ['+login', 'anonymous']
-      : ['+login', requestedSteamUsername, requestedSteamPassword]
-    const steamcmdArgs = [
-      '+force_install_dir', instance.workingDirectory,
-      ...steamLoginArguments,
-      ...getSteamUpdateArguments(
+    const steamLoginCommand = shouldUseAnonymous
+      ? 'login anonymous'
+      : `login ${quoteSteamCMDConsoleArgument(requestedSteamUsername)} ${quoteSteamCMDConsoleArgument(requestedSteamPassword)}`
+    const steamcmdCommands = [
+      `force_install_dir ${quoteSteamCMDConsoleArgument(instance.workingDirectory)}`,
+      steamLoginCommand,
+      getSteamUpdateCommand(
         instance.steam.appId,
         selectedBranch,
         requestedBetaPassword || undefined,
         Boolean(validate)
       ),
-      '+quit'
+      'quit'
     ]
-
-    const updateResult = await terminalManager.runManagedProcess({
-      executablePath: steamcmdPath,
-      args: steamcmdArgs,
-      workingDirectory: path.dirname(steamcmdPath),
-      redactValues: [requestedBetaPassword, requestedSteamPassword].filter(Boolean)
-    })
-    if (updateResult.code !== 0) {
-      logger.warn(`Steam实例更新失败: ${instance.name}`, {
-        instanceId: instance.id,
-        appId: instance.steam.appId,
-        branch: selectedBranch,
-        exitCode: updateResult.code,
-        signal: updateResult.signal
-      })
-      return res.status(500).json({
+    const updateId = `steam-update-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    if (!instanceManager.acquireOperationLock(instance.id, updateId, 'Steam 服务端更新')) {
+      return res.status(409).json({
         success: false,
-        error: 'Steam服务端更新失败',
-        message: updateResult.output.slice(-2000) || `SteamCMD退出码: ${updateResult.code}`
+        error: '该实例正在执行其他操作'
+      })
+    }
+    operationLock = { instanceId: instance.id, token: updateId }
+
+    const currentInstance = instanceManager.getInstance(instance.id)
+    if (!currentInstance || (currentInstance.status !== 'stopped' && currentInstance.status !== 'error')) {
+      return res.status(400).json({
+        success: false,
+        error: '请先停止实例再更新服务端'
       })
     }
 
-    const updatedInstance = await instanceManager.updateInstance(instance.id, {
-      name: instance.name,
-      description: instance.description,
-      workingDirectory: instance.workingDirectory,
-      startCommand: instance.startCommand,
-      autoStart: instance.autoStart,
-      stopCommand: instance.stopCommand,
-      enableStreamForward: instance.enableStreamForward,
-      programPath: instance.programPath,
-      terminalUser: instance.terminalUser,
-      instanceType: instance.instanceType,
-      javaVersion: instance.javaVersion,
-      steam: {
-        ...instance.steam,
-        branch: selectedBranch
-      }
-    })
+    updateRunScript = await createSteamCMDRunScript(steamcmdCommands)
+    const activeRunScript = updateRunScript
+    await prepareSteamCMDLaunch(steamcmdPath)
 
-    logger.info(`Steam实例更新完成: ${instance.name}`, {
+    const userId = req.user!.userId
+    const updateRoom = `user:${userId}`
+    updateTask = {
+      updateId,
+      userId,
       instanceId: instance.id,
-      appId: instance.steam.appId,
-      branch: selectedBranch,
-      validate: Boolean(validate),
-      useAnonymous: shouldUseAnonymous
-    })
+      requestedBranch: selectedBranch,
+      status: 'running',
+      updatedAt: new Date().toISOString()
+    }
+    steamUpdateTasks.set(updateId, updateTask)
 
-    res.json({
+    res.status(202).json({
       success: true,
-      message: '服务端更新完成',
+      message: 'Steam服务端更新已开始',
       data: {
-        instance: updatedInstance,
-        requestedBranch: selectedBranch,
-        output: updateResult.output.slice(-4000)
+        updateId,
+        instanceId: instance.id,
+        requestedBranch: selectedBranch
       }
+    })
+    handedOff = true
+
+    setImmediate(() => {
+      void (async () => {
+        try {
+          io?.to(updateRoom).emit('steam-update-log', {
+            updateId,
+            instanceId: instance.id,
+            message: `开始更新 ${instance.name} 到 ${selectedBranch} 分支\n`
+          })
+
+          const updateResult = await terminalManager.runManagedProcess({
+            executablePath: steamcmdPath,
+            args: [
+              '-logdir', activeRunScript.logDirectory,
+              '+runscript', activeRunScript.filePath
+            ],
+            workingDirectory: path.dirname(steamcmdPath),
+            redactValues: [requestedBetaPassword, requestedSteamPassword].filter(Boolean),
+            timeoutMs: 30 * 60 * 1000,
+            onOutput: output => {
+              io?.to(updateRoom).emit('steam-update-log', {
+                updateId,
+                instanceId: instance.id,
+                message: output
+              })
+            }
+          })
+          if (updateResult.code !== 0) {
+            throw new Error(updateResult.output.slice(-2000) || `SteamCMD退出码: ${updateResult.code}`)
+          }
+
+          const latestInstance = instanceManager.getInstance(instance.id)
+          if (!latestInstance) {
+            throw new Error('实例已不存在，无法保存Steam分支信息')
+          }
+
+          const updatedInstance = await instanceManager.updateInstance(instance.id, {
+            name: latestInstance.name,
+            description: latestInstance.description,
+            workingDirectory: latestInstance.workingDirectory,
+            startCommand: latestInstance.startCommand,
+            autoStart: latestInstance.autoStart,
+            stopCommand: latestInstance.stopCommand,
+            enableStreamForward: latestInstance.enableStreamForward,
+            programPath: latestInstance.programPath,
+            terminalUser: latestInstance.terminalUser,
+            instanceType: latestInstance.instanceType,
+            javaVersion: latestInstance.javaVersion,
+            steam: {
+              ...latestInstance.steam!,
+              branch: selectedBranch
+            }
+          }, updateId)
+          if (!updatedInstance) {
+            throw new Error('保存Steam分支信息失败')
+          }
+
+          logger.info(`Steam实例更新完成: ${instance.name}`, {
+            instanceId: instance.id,
+            appId: instance.steam.appId,
+            branch: selectedBranch,
+            validate: Boolean(validate),
+            useAnonymous: shouldUseAnonymous
+          })
+          finishSteamUpdateTask(updateId, 'completed')
+          io?.to(updateRoom).emit('steam-update-complete', {
+            updateId,
+            instanceId: instance.id,
+            requestedBranch: selectedBranch,
+            instance: updatedInstance
+          })
+        } catch (error: any) {
+          logger.error(`Steam实例更新失败: ${instance.name}`, {
+            instanceId: instance.id,
+            appId: instance.steam.appId,
+            branch: selectedBranch,
+            error: error.message
+          })
+          const errorMessage = error.message || 'Steam服务端更新失败'
+          finishSteamUpdateTask(updateId, 'failed', errorMessage)
+          io?.to(updateRoom).emit('steam-update-error', {
+            updateId,
+            instanceId: instance.id,
+            error: errorMessage
+          })
+        } finally {
+          await activeRunScript.cleanup().catch(error => {
+            logger.warn('清理SteamCMD更新脚本失败', error)
+          })
+          instanceManager.releaseOperationLock(instance.id, updateId)
+        }
+      })()
     })
   } catch (error: any) {
     logger.error('更新Steam实例失败:', error)
-    res.status(500).json({
-      success: false,
-      error: '更新Steam实例失败',
-      message: error.message
-    })
+    if (updateTask && !handedOff) {
+      finishSteamUpdateTask(updateTask.updateId, 'failed', error.message || 'Steam服务端更新失败')
+    }
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: '更新Steam实例失败',
+        message: error.message
+      })
+    }
   } finally {
-    if (lockedInstanceId) activeSteamUpdates.delete(lockedInstanceId)
+    if (updateRunScript && !handedOff) {
+      await updateRunScript.cleanup().catch(error => {
+        logger.warn('清理SteamCMD更新脚本失败', error)
+      })
+    }
+    if (operationLock && !handedOff) {
+      instanceManager.releaseOperationLock(operationLock.instanceId, operationLock.token)
+    }
   }
 })
 
 // 安装游戏
 router.post('/install', authenticateToken, async (req: Request, res: Response) => {
+  let installOperationLock: { instanceId: string; token: string } | null = null
+  let installRunScript: SteamCMDRunScript | null = null
+  let installProcessStarted = false
+  const releaseInstallOperationLock = () => {
+    if (!installOperationLock) return
+    instanceManager.releaseOperationLock(installOperationLock.instanceId, installOperationLock.token)
+    installOperationLock = null
+  }
+
   try {
     const { 
       gameKey, 
@@ -630,9 +1172,8 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
         message: '游戏标识、Steam AppID、安装路径和实例名称为必填项'
       })
     }
-
     const normalizedAppId = String(appId).trim()
-    if (!/^\d+$/.test(normalizedAppId)) {
+    if (!/^\d{1,10}$/.test(normalizedAppId) || Number(normalizedAppId) > 0xFFFFFFFF) {
       return res.status(400).json({
         success: false,
         error: 'Steam AppID格式无效'
@@ -646,18 +1187,89 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
       })
     }
 
-    if (!useAnonymous) {
-      if (typeof steamUsername !== 'string' || !steamUsername.trim() || typeof steamPassword !== 'string' || !steamPassword.trim()) {
+    const shouldUseAnonymous = useAnonymous !== false
+    const requestedSteamUsername = typeof steamUsername === 'string' ? steamUsername.trim() : ''
+    const requestedSteamPassword = typeof steamPassword === 'string' ? steamPassword : ''
+    if (!shouldUseAnonymous) {
+      if (!requestedSteamUsername) {
         return res.status(400).json({
           success: false,
-          error: 'Steam账户信息不完整'
+          error: '缺少Steam用户名'
         })
       }
 
-      if (steamUsername.length > 128 || steamPassword.length > 256 || /[\r\n]/.test(steamUsername) || /[\r\n]/.test(steamPassword)) {
+      if (
+        requestedSteamUsername.length > 128
+        || requestedSteamPassword.length > 256
+        || /[\r\n]/.test(requestedSteamUsername)
+        || /[\r\n]/.test(requestedSteamPassword)
+      ) {
         return res.status(400).json({
           success: false,
           error: 'Steam账户信息格式无效'
+        })
+      }
+    }
+
+    const selectedBranch = normalizeSteamBranch(branch)
+    if (selectedBranch.length > 128 || !/^[\w.-]+$/.test(selectedBranch)) {
+      return res.status(400).json({ success: false, error: 'Steam分支名称无效' })
+    }
+    const selectedBetaPassword = typeof betaPassword === 'string' ? betaPassword.trim() : ''
+    if (selectedBetaPassword.length > 256 || /[\r\n]/.test(selectedBetaPassword)) {
+      return res.status(400).json({ success: false, error: 'Steam分支密码无效' })
+    }
+
+    let userLaunchArguments = ''
+    try {
+      userLaunchArguments = validateLaunchArguments(launchArgs)
+    } catch (error: any) {
+      return res.status(400).json({ success: false, error: error.message })
+    }
+
+    const requestedExistingInstance = existingInstanceId
+      ? instanceManager.getInstance(existingInstanceId)
+      : undefined
+    if (existingInstanceId && !requestedExistingInstance) {
+      return res.status(404).json({
+        success: false,
+        error: '实例不存在',
+        message: `未找到ID为 ${existingInstanceId} 的实例`
+      })
+    }
+    if (
+      requestedExistingInstance
+      && requestedExistingInstance.status !== 'stopped'
+      && requestedExistingInstance.status !== 'error'
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: '请先停止实例再安装或更新服务端'
+      })
+    }
+
+    const installOperationToken = `steam-install-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+    if (requestedExistingInstance) {
+      if (!instanceManager.acquireOperationLock(
+        requestedExistingInstance.id,
+        installOperationToken,
+        'Steam 服务端安装或更新'
+      )) {
+        return res.status(409).json({
+          success: false,
+          error: '该实例正在执行其他操作'
+        })
+      }
+      installOperationLock = {
+        instanceId: requestedExistingInstance.id,
+        token: installOperationToken
+      }
+
+      const currentInstance = instanceManager.getInstance(requestedExistingInstance.id)
+      if (!currentInstance || (currentInstance.status !== 'stopped' && currentInstance.status !== 'error')) {
+        return res.status(400).json({
+          success: false,
+          error: '请先停止实例再安装或更新服务端'
         })
       }
     }
@@ -744,6 +1356,19 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
       
       // 获取SteamCMD所在目录作为工作目录
       const steamcmdDir = path.dirname(steamcmdPath)
+
+      const linuxRuntimeIssue = await checkLinuxSteamCMDRuntime(steamcmdDir)
+      if (linuxRuntimeIssue) {
+        return res.status(400).json({
+          success: false,
+          error: 'SteamCMD Linux运行环境不完整',
+          message: linuxRuntimeIssue.message,
+          data: {
+            fixCommands: linuxRuntimeIssue.fixCommands,
+            missingLibraries: linuxRuntimeIssue.missingLibraries
+          }
+        })
+      }
       
       // 创建虚拟socket用于终端会话
       const virtualSocket = {
@@ -752,71 +1377,30 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
         on: () => {},
         disconnect: () => {}
       } as any
-      
-      // 生成终端会话ID
-      const terminalSessionId = `install-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      
-      // 创建终端会话并执行安装命令
-      await terminalManager.createPty(virtualSocket, {
-        sessionId: terminalSessionId,
-        cols: 80,
-        rows: 24,
-        workingDirectory: steamcmdDir
-      })
-      
-      // 等待终端完全初始化
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // 根据操作系统构建SteamCMD执行命令
-      const platform = os.platform()
-      let steamcmdExecutable: string
-      let fullCommand: string
-      const selectedBranch = normalizeSteamBranch(branch)
-      if (selectedBranch.length > 128 || !/^[\w.-]+$/.test(selectedBranch)) {
-        throw new Error('Steam分支名称无效')
-      }
-      const userLaunchArguments = validateLaunchArguments(launchArgs)
-      const selectedBetaPassword = typeof betaPassword === 'string' ? betaPassword.trim() : ''
-      if (selectedBetaPassword.length > 256 || /[\r\n]/.test(selectedBetaPassword)) {
-        throw new Error('Steam分支密码无效')
-      }
-      const normalizedSteamLogin = useAnonymous
-        ? '+login anonymous'
-        : `+login ${quoteSteamCMDArgument(String(steamUsername).trim())} ${quoteSteamCMDArgument(String(steamPassword))}`
-      const branchArguments = selectedBranch === 'public'
-        ? ''
-        : ` -beta ${quoteSteamCMDArgument(selectedBranch)}${selectedBetaPassword ? ` -betapassword ${quoteSteamCMDArgument(selectedBetaPassword)}` : ''}`
-      const validateArgument = validateGameIntegrity ? ' validate' : ''
-      const commandWithBranch = `+force_install_dir ${quoteSteamCMDArgument(installPath)} ${normalizedSteamLogin} +app_update ${normalizedAppId}${branchArguments}${validateArgument} +quit`
-      
-      if (platform === 'win32') {
-        steamcmdExecutable = '.\\steamcmd.exe'
-        fullCommand = `${steamcmdExecutable} ${commandWithBranch}`
-      } else {
-        // Linux环境下确保使用root用户权限执行SteamCMD
-        steamcmdExecutable = './steamcmd.sh'
-        // 检查当前用户是否为root，如果不是则使用sudo
-        const currentUser = process.env.USER || process.env.USERNAME || 'unknown'
-        if (currentUser === 'root') {
-          fullCommand = `${steamcmdExecutable} ${commandWithBranch}`
-        } else {
-          fullCommand = `sudo -u root ${steamcmdExecutable} ${commandWithBranch}`
-        }
-      }
-      
+      const terminalSessionId = installOperationToken
+
+      const platform = getCurrentPlatform()
+      const steamcmdCommands = [
+        `force_install_dir ${quoteSteamCMDConsoleArgument(installPath)}`,
+        shouldUseAnonymous
+          ? 'login anonymous'
+          : `login ${quoteSteamCMDConsoleArgument(requestedSteamUsername)}${requestedSteamPassword ? ` ${quoteSteamCMDConsoleArgument(requestedSteamPassword)}` : ''}`,
+        getSteamUpdateCommand(
+          normalizedAppId,
+          selectedBranch,
+          selectedBetaPassword || undefined,
+          Boolean(validateGameIntegrity)
+        ),
+        'quit'
+      ]
+
       logger.info('执行SteamCMD安装命令', {
         platform,
         workingDirectory: steamcmdDir,
         appId: normalizedAppId,
         branch: selectedBranch,
         validate: Boolean(validateGameIntegrity),
-        useAnonymous: Boolean(useAnonymous)
-      })
-      
-      // 发送安装命令到终端
-      terminalManager.handleInput(virtualSocket, {
-        sessionId: terminalSessionId,
-        data: fullCommand + '\r'
+        useAnonymous: shouldUseAnonymous
       })
       
       // 处理实例：更新或创建
@@ -824,15 +1408,7 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
       
       if (existingInstanceId) {
         // 如果存在实例ID，使用现有实例
-        const existingInstance = instanceManager.getInstance(existingInstanceId)
-        if (!existingInstance) {
-          return res.status(404).json({
-            success: false,
-            error: '实例不存在',
-            message: `未找到ID为 ${existingInstanceId} 的实例`
-          })
-        }
-        
+        const existingInstance = requestedExistingInstance!
         instance = existingInstance
         
         instance = await instanceManager.updateInstance(existingInstanceId, {
@@ -852,7 +1428,7 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
             gameKey,
             branch: selectedBranch
           }
-        })
+        }, installOperationToken)
 
         // 如果需要更新实例信息
         if (updateInstanceInfo) {
@@ -860,9 +1436,9 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
           let startCommand = 'none'
           try {
             // 确定系统类型
-            const platform = os.platform()
+            const platform = getCurrentPlatform()
             let systemType = 'Linux'
-            if (platform === 'win32') {
+            if (platform === Platform.Windows) {
               systemType = 'Windows'
             }
             
@@ -930,11 +1506,19 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
                 startCommand = matchedInstance.command
                 logger.info(`从实例市场找到匹配的启动命令: ${gameNameToMatch} -> ${startCommand}`)
               } else {
-                logger.info(`实例市场中未找到匹配的游戏: ${gameNameToMatch}，使用默认启动命令`)
+                logger.info(`实例市场中未找到匹配的游戏: ${gameNameToMatch}，尝试使用本地清单启动命令`)
               }
             }
           } catch (error: any) {
-            logger.warn('查询实例市场失败，使用默认启动命令:', error.message)
+            logger.warn('查询实例市场失败，尝试使用本地清单启动命令:', error.message)
+          }
+
+          if (startCommand === 'none') {
+            const localStartCommand = await getLocalStartCommandForGame(gameKey)
+            if (localStartCommand) {
+              startCommand = localStartCommand
+              logger.info(`使用本地清单启动命令: ${gameKey} -> ${startCommand}`)
+            }
           }
           
           // 更新实例信息
@@ -956,7 +1540,7 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
               gameKey,
               branch: selectedBranch
             }
-          })
+          }, installOperationToken)
           
           // 重新获取更新后的实例
           instance = instanceManager.getInstance(existingInstanceId)
@@ -978,9 +1562,9 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
         let startCommand = 'none'
         try {
           // 确定系统类型
-          const platform = os.platform()
+          const platform = getCurrentPlatform()
           let systemType = 'Linux'
-          if (platform === 'win32') {
+          if (platform === Platform.Windows) {
             systemType = 'Windows'
           }
           
@@ -1048,11 +1632,19 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
               startCommand = matchedInstance.command
               logger.info(`从实例市场找到匹配的启动命令: ${gameNameToMatch} -> ${startCommand}`)
             } else {
-              logger.info(`实例市场中未找到匹配的游戏: ${gameNameToMatch}，使用默认启动命令`)
+              logger.info(`实例市场中未找到匹配的游戏: ${gameNameToMatch}，尝试使用本地清单启动命令`)
             }
           }
         } catch (error: any) {
-          logger.warn('查询实例市场失败，使用默认启动命令:', error.message)
+          logger.warn('查询实例市场失败，尝试使用本地清单启动命令:', error.message)
+        }
+
+        if (startCommand === 'none') {
+          const localStartCommand = await getLocalStartCommandForGame(gameKey)
+          if (localStartCommand) {
+            startCommand = localStartCommand
+            logger.info(`使用本地清单启动命令: ${gameKey} -> ${startCommand}`)
+          }
         }
         
         // 创建实例（在安装开始时就创建，而不是等安装完成）
@@ -1072,8 +1664,59 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
           }
         }
         
-        instance = await instanceManager.createInstance(instanceData)
+        instance = await instanceManager.createInstance(instanceData, {
+          token: installOperationToken,
+          reason: 'Steam 服务端安装或更新'
+        })
+        installOperationLock = {
+          instanceId: instance.id,
+          token: installOperationToken
+        }
       }
+
+      // 在所有实例校验和配置写入成功后才启动SteamCMD，避免失败请求继续修改服务端文件。
+      installRunScript = await createSteamCMDRunScript(steamcmdCommands, {
+        allowPasswordPrompt: !shouldUseAnonymous && !requestedSteamPassword,
+        maxLifetimeMs: 24 * 60 * 60 * 1000
+      })
+      const activeRunScript = installRunScript
+      await prepareSteamCMDLaunch(steamcmdPath)
+      const currentUser = process.env.USER || process.env.USERNAME || 'unknown'
+      const steamArguments = [
+        '-logdir', activeRunScript.logDirectory,
+        '+runscript', activeRunScript.filePath
+      ]
+      const steamCommand = platform !== Platform.Windows && currentUser !== 'root'
+        ? ['sudo', '-u', 'root', steamcmdPath, ...steamArguments]
+        : [steamcmdPath, ...steamArguments]
+
+      await terminalManager.createPty(virtualSocket, {
+        sessionId: terminalSessionId,
+        cols: 80,
+        rows: 24,
+        workingDirectory: steamcmdDir
+      }, {
+        command: steamCommand,
+        redactValues: [requestedSteamPassword, selectedBetaPassword].filter(Boolean),
+        onExit: (code, signal) => {
+          logger.info('SteamCMD安装会话已结束', {
+            terminalSessionId,
+            instanceId: installOperationLock?.instanceId,
+            code,
+            signal
+          })
+          installRunScript = null
+          void activeRunScript.cleanup().catch(error => {
+            logger.warn('清理SteamCMD安装脚本失败', error)
+          })
+          releaseInstallOperationLock()
+        }
+      })
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      if (!terminalManager.hasSession(terminalSessionId)) {
+        throw new Error('SteamCMD终端会话未能启动')
+      }
+      installProcessStarted = true
       
       logger.info(`游戏安装已开始: ${gameName || gameKey}`, {
         terminalSessionId,
@@ -1109,6 +1752,16 @@ router.post('/install', authenticateToken, async (req: Request, res: Response) =
         error: '游戏安装请求处理失败',
         message: error.message
       })
+    }
+  } finally {
+    if (!installProcessStarted) {
+      if (installRunScript) {
+        await installRunScript.cleanup().catch(error => {
+          logger.warn('清理SteamCMD安装脚本失败', error)
+        })
+        installRunScript = null
+      }
+      releaseInstallOperationLock()
     }
   }
 })
@@ -1253,8 +1906,8 @@ router.post('/scan-minecraft-directory', authenticateToken, async (req: Request,
     
     try {
       const files = await fs.readdir(directory)
-      const platform = os.platform()
-      const isWindows = platform === 'win32'
+      const platform = getCurrentPlatform()
+      const isWindows = platform === Platform.Windows
       
       // 查找.jar文件
       const jarFiles = files.filter(file => file.toLowerCase().endsWith('.jar'))
@@ -1309,7 +1962,7 @@ router.post('/scan-minecraft-directory', authenticateToken, async (req: Request,
           shFiles,
           recommendedStartCommand,
           startMethod,
-          platform: isWindows ? 'Windows' : (platform === 'darwin' ? 'MacOS' : 'Linux')
+          platform
         }
       })
       
