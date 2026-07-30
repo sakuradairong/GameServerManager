@@ -1,7 +1,8 @@
 {
   "name": "gsm3-management-panel",
-  "version": "1.0.0",
+  "version": "3.12.0",
   "description": "GSM3游戏服务端管理面板",
+  "private": true,
   "main": "dist/index.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
@@ -20,6 +21,9 @@
     "start": "cd server && npm start",
     "start:prod": "cd dist && node index.js",
     "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "typecheck": "npm --prefix server run typecheck && npm --prefix client run typecheck",
+    "typecheck:server": "npm --prefix server run typecheck",
+    "typecheck:client": "npm --prefix client run typecheck",
     "clean": "rimraf dist && rimraf server/dist && rimraf client/dist",
     "test": "cd server && npm test",
     "lint": "cd client && npm run lint"
@@ -50,21 +54,20 @@
     "gsm3",
     "gaming"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "GameServerManager contributors",
+  "license": "GPL-3.0-only",
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
   },
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/GSManagerXZ/GameServerManager.git"
   },
   "bugs": {
-    "url": ""
+    "url": "https://github.com/GSManagerXZ/GameServerManager/issues"
   },
-  "homepage": "",
-  "private": true,
+  "homepage": "https://github.com/GSManagerXZ/GameServerManager#readme",
   "dependencies": {
     "tar": "^7.5.13"
   }

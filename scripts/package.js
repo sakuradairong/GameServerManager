@@ -353,18 +353,34 @@ async function createPackage() {
       path.join(packageDir, 'server')
     )
     
-    // 复制服务端package.json和必要文件
+    // 复制服务端依赖清单，确保生产依赖可复现安装
     await fs.copy(
       path.join(__dirname, '..', 'server', 'package.json'),
       path.join(packageDir, 'server', 'package.json')
     )
+    await fs.copy(
+      path.join(__dirname, '..', 'server', 'package-lock.json'),
+      path.join(packageDir, 'server', 'package-lock.json')
+    )
     
     // PTY 文件不再从本地复制，改为从 GitHub 下载到 data/lib/ 目录
     
-    // 复制环境变量配置文件
+    // 从公开模板生成发行包默认配置，不打包开发者本地 .env。
     await fs.copy(
-      path.join(__dirname, '..', 'server', '.env'),
+      path.join(__dirname, '..', '.env.example'),
+      path.join(packageDir, '.env')
+    )
+    await fs.copy(
+      path.join(__dirname, '..', '.env.example'),
+      path.join(packageDir, '.env.example')
+    )
+    await fs.copy(
+      path.join(__dirname, '..', 'server', '.env.example'),
       path.join(packageDir, 'server', '.env')
+    )
+    await fs.copy(
+      path.join(__dirname, '..', 'server', '.env.example'),
+      path.join(packageDir, 'server', '.env.example')
     )
     
     // 创建uploads目录
@@ -401,7 +417,7 @@ async function createPackage() {
     console.log('📥 安装服务端生产依赖...')
     // 在打包的服务端目录中安装生产依赖
     try {
-      execSync('npm install --production --omit=dev', {
+      execSync('npm ci --omit=dev', {
         cwd: path.join(packageDir, 'server'),
         stdio: 'inherit'
       })

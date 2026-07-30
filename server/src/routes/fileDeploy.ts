@@ -438,6 +438,14 @@ router.post('/deploy', authenticateToken, async (req: Request, res: Response) =>
     if (sourceType === 'upload') {
       uploadSession = uploadSessions.get(req.body.uploadSessionId)
       if (!uploadSession) throw new Error('上传会话不存在或已过期')
+<<<<<<< ours
+=======
+
+      // Claim the single-use upload synchronously, before any asynchronous
+      // filesystem work can let another request capture the same session.
+      uploadSessions.delete(uploadSession.id)
+
+>>>>>>> theirs
       const archivePath = path.join(uploadSession.directory, uploadSession.fileName)
       if (!await fs.pathExists(archivePath)) throw new Error('上传的压缩包不存在')
     }

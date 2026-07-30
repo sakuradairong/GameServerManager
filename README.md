@@ -5,11 +5,12 @@
 **新一代游戏服务器管理平台 - 让游戏服务器的部署、管理和维护变得简单高效**
 
 [![GitHub Stars](https://badgen.net/github/stars/GSManagerXZ/GameServerManager)](https://github.com/GSManagerXZ/GameServerManager/stargazers)
+[![CI](https://github.com/GSManagerXZ/GameServerManager/actions/workflows/ci.yml/badge.svg)](https://github.com/GSManagerXZ/GameServerManager/actions/workflows/ci.yml)
 [![GitHub Release](https://badgen.net/github/release/GSManagerXZ/GameServerManager)](https://github.com/GSManagerXZ/GameServerManager/releases)
 [![Docker Pulls](https://badgen.net/docker/pulls/xiaozhu674/gameservermanager)](https://hub.docker.com/r/xiaozhu674/gameservermanager)
 [![License](https://badgen.net/github/license/GSManagerXZ/GameServerManager)](https://github.com/GSManagerXZ/GameServerManager/blob/main/LICENSE)
 
-[📖 文档站](http://docs.gsm.xiaozhuhouses.asia/) • [🌐 官方网站](http://gsm.xiaozhuhouses.asia/) • [💬 QQ群](https://qm.qq.com/q/oNd4HvMj6M)
+[📖 文档站](https://docs.gsm.xiaozhuhouses.asia/) • [🌐 官方网站](http://gsm.xiaozhuhouses.asia/) • [💬 QQ群](https://qm.qq.com/q/oNd4HvMj6M)
 
 </div>
 
@@ -40,6 +41,12 @@ GameServerManager 3.0（简称GSM3）是一个基于现代化技术栈的游戏�
 
 ## 本地开发部署
 
+### 环境要求
+
+- Node.js `>=20.19.0`，推荐使用 `.nvmrc` 中的 `22.17.0`
+- npm `>=10.0.0`
+- Windows 或 Linux
+
 ### 标准部署（x86_64）
 
 ```bash
@@ -50,7 +57,11 @@ npm run install:all
 npm run dev
 
 # 生产模式构建
-npm run package:<windows/linux>
+npm run package:windows
+npm run package:linux
+
+# 仅执行类型检查
+npm run typecheck
 ```
 
 ### ARM64 架构部署
@@ -65,8 +76,8 @@ sudo apt-get install qemu-user-static
 # 安装 ARM64 交叉编译库
 sudo apt-get install libc6-dev-arm64-cross
 
-# 确保 ARM64 Node.js v20.19.0 已安装到指定路径
-# /home/xiaozhu/qemu/Node/node-v20.19.0-linux-arm64/
+# 确保 ARM64 Node.js 已安装，并在脚本配置中指定实际路径
+# 例如：$HOME/node/node-v22.17.0-linux-arm64/
 ```
 
 #### 一键启动
@@ -100,7 +111,7 @@ sudo apt-get install libc6-dev-arm64-cross
 - **TailwindCSS** - 原子化 CSS 框架
 
 ### 后端技术栈
-- **Node.js 18+** - 高性能 JavaScript 运行时
+- **Node.js 20.19+** - 高性能 JavaScript 运行时
 - **TypeScript** - 类型安全的服务端开发
 - **Express.js** - 轻量级 Web 框架
 - **Socket.IO** - 实时双向通信服务端
@@ -141,10 +152,10 @@ GSManager3/
 │   │   ├── middleware/       # 中间件
 │   │   ├── utils/            # 工具函数
 │   │   └── Python/           # Python 脚本
-│   ├── data/                 # 数据存储目录
-│   │   ├── games/            # 游戏数据
+│   ├── data/                 # 默认资源与本地运行数据目录
+│   │   ├── games/            # 可安装游戏清单
 │   │   ├── lib/              # 运行依赖（PTY、Zip-Tools 等二进制文件）
-│   │   └── plugins/          # 插件数据
+│   │   └── plugins/          # 内置插件与插件文档
 │   └── package.json          # 后端依赖
 ├── scripts/                   # 构建脚本
 ├── docker-compose.yml         # Docker 编排文件
@@ -153,18 +164,30 @@ GSManager3/
 ```
 
 ## 🤝 贡献流程
-### 贡献者准则
-1. 我们不限制您使用AI等辅助工具对代码进行贡献，若您使用AI参与开发请确保您的编辑器已导入项目规则，项目规则在根目录下`AGENTS.md`文件
-2. 不得提交具有后门，入侵操作系统等严重违规违法故意破坏使用者计算机的行为！
-3. 请确保您提交的代码清晰标注注释，变量请使用驼峰命名法。
-4. 代码逻辑不能采用非常简单粗暴的行为，应当评估代码在正式环境中对系统性能影响程度，始终要把性能消耗降到最低。
+
+欢迎提交 Issue、文档改进和 Pull Request。开始前请阅读：
+
+- [贡献指南](CONTRIBUTING.md)
+- [社区行为准则](CODE_OF_CONDUCT.md)
+- [安全策略](SECURITY.md)
+
+使用 AI 辅助开发是允许的，但贡献者仍需对代码正确性、安全性、许可证和验证结果负责。
+
+---
+
+## 🔒 安全提示
+
+- 首次部署后立即修改默认账户密码，不要直接将管理端口暴露到公网。
+- `.env`、日志、RCON 配置、Token 和用户数据不得提交到仓库或公开 Issue。
+- 安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告。
+
 ---
 
 ## 📞 支持与反馈
 
 - 🐛 **问题反馈**：[GitHub Issues](https://github.com/GSManagerXZ/GameServerManager/issues)
 - 💬 **QQ交流群**：1040201322
-- 📖 **详细文档**：[GSM3 文档站](http://docs.gsm.xiaozhuhouses.asia/)
+- 📖 **详细文档**：[GSM3 文档站](https://docs.gsm.xiaozhuhouses.asia/)
 - 🌐 **官方网站**：[GSM3 官网](http://gsm.xiaozhuhouses.asia/)
 - 💝 **赞助支持**：[爱发电](https://afdian.net/a/xiaozhu674)
 
@@ -178,13 +201,16 @@ GSManager3/
 
 ## 👨‍💻 关于作者
 
-此项目由 **又菜又爱玩的小朱** 独立开发维护。
+此项目由 **又菜又爱玩的小朱** 发起，并由项目维护者和
+[社区贡献者](https://github.com/GSManagerXZ/GameServerManager/graphs/contributors) 共同维护。
 
 如果这个项目对你有帮助，请给个 ⭐ Star 支持一下！
 
 ---
 
 ## 🔄 版本说明
+
+最新稳定版本、变更记录和构建产物以 [GitHub Releases](https://github.com/GSManagerXZ/GameServerManager/releases) 为准。
 
 - **GSM3.0** - 全新架构，基于 React + TypeScript + Node.js
 - **GSM2.0** - 基于 Python + Flask 的经典版本 [查看源码](https://github.com/GSManagerXZ/GameServerManager2)
@@ -214,6 +240,6 @@ GSManager3/
 
 **GSM3.0 - 新一代游戏服务器管理平台**
 
-[🌐 官网](http://gsm.xiaozhuhouses.asia/) | [📖 文档](http://docs.gsm.xiaozhuhouses.asia/) | [💬 交流群](https://qm.qq.com/q/oNd4HvMj6M)
+[🌐 官网](http://gsm.xiaozhuhouses.asia/) | [📖 文档](https://docs.gsm.xiaozhuhouses.asia/) | [💬 交流群](https://qm.qq.com/q/oNd4HvMj6M)
 
 </div>

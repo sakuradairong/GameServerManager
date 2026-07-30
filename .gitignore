@@ -15,7 +15,15 @@ panel/public/
 .cursor/
 .kiro/
 .agents/
+.codex/
+.tokrepo/
 MCSManager/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!**/.env.example
 
 config.json
 instances.json
@@ -26,11 +34,21 @@ terminal-sessions.json
 captchas.json
 users.json
 favorites.json
-server/data/environment
-server/data/wallpapers/
-server/data/lib/
-server/data/tunnels/
-server/data/tools/
+
+# Server runtime data. Only curated defaults belong in Git.
+server/data/*
+!server/data/games/
+!server/data/games/**
+!server/data/gameconfig/
+!server/data/gameconfig/**
+!server/data/plugins/
+!server/data/plugins/**
+server/data/games/*.backup.*
+
+server/uploads/
+uploads/
+game_data/
+game_file/
 data/wallpapers/
 data/lib/
 data/tunnels/

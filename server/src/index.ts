@@ -134,6 +134,7 @@ let steamcmdManager: SteamCMDManager
 let schedulerManager: SchedulerManager
 let pluginManager: PluginManager
 let fileWatchManager: FileWatchManager
+const appVersion = process.env.npm_package_version || '3.12.0'
 
 // 健康检查端点
 app.get('/api/health', (req, res) => {
@@ -142,7 +143,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     memory: process.memoryUsage(),
-    version: process.env.npm_package_version || '1.0.0'
+    version: appVersion
   })
 })
 
@@ -150,7 +151,7 @@ app.get('/api/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'GSM3 Server',
-    version: '1.0.0',
+    version: appVersion,
     description: '游戏面板后端服务',
     endpoints: {
       health: '/api/health',
@@ -478,6 +479,9 @@ async function ensureEnvFile() {
 # 后端API服务端口
 SERVER_PORT=3001
 
+# 服务器监听地址（默认同时监听 IPv4 和 IPv6）
+HOST=::
+
 # 前端开发服务端口（仅开发环境使用）
 CLIENT_PORT=5173
 
@@ -491,10 +495,10 @@ LOG_LEVEL=info
 # 前端访问地址（开发环境）
 CLIENT_URL=http://localhost:5173
 # 允许的前端访问地址，生产环境请修改为实际域名
-CORS_ORIGIN=*
+CORS_ORIGIN=http://localhost:5173
 
 # Socket.IO配置
-SOCKET_CORS_ORIGIN=*
+SOCKET_CORS_ORIGIN=http://localhost:5173
 
 # 数据目录
 DATA_DIR=./data
@@ -511,8 +515,8 @@ GAME_MAX_INSTANCES=0
 GAME_DATA_DIR=./data/games
 
 # 系统监控配置
-SYSTEM_MONITOR_INTERVAL=3000
-SYSTEM_STATS_HISTORY_SIZE=1200
+SYSTEM_MONITOR_INTERVAL=5000
+SYSTEM_STATS_HISTORY_SIZE=720
 
 # 告警配置
 ALERT_CPU_WARNING=70
@@ -537,8 +541,7 @@ REQUEST_TIMEOUT=0
 # 说明：
 # 1. 修改 SERVER_PORT 可以更改后端服务端口
 # 2. 生产环境部署时，请将 CORS_ORIGIN 和 SOCKET_CORS_ORIGIN 设置为实际的前端访问地址
-# 3. 请务必修改 SESSION_SECRET 和 JWT_SECRET 为随机字符串
-# 4. 根据服务器配置调整 JAVA_OPTS 中的内存设置
+# 3. 根据服务器配置调整 JAVA_OPTS 中的内存设置
 `
 
     await fs.writeFile(envPath, envContent, 'utf8')

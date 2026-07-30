@@ -1,10 +1,7 @@
 name: Build Package
 
-# 添加权限配置
 permissions:
-  contents: write
-  packages: write
-  actions: read
+  contents: read
 
 on:
   workflow_dispatch:
@@ -32,26 +29,28 @@ on:
   push:
     tags:
       - 'v*'
-  release:
-    types: [published]
 
 jobs:
   build_linux:
-    if: github.event.inputs.build_linux == 'true' || github.event_name == 'push' || github.event_name == 'release'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js for build
         uses: actions/setup-node@v4
         with:
-          node-version: '22.16.0'
+          node-version: '22.17.0'
           cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
 
       - name: Install dependencies
         run: |
-          npm install
-          cd client && npm install
-          cd ../server && npm install
+          npm ci
+          npm ci --prefix client
+          npm ci --prefix server
       - name: Build package
         run: npm run package:linux
         env:
@@ -65,24 +64,24 @@ jobs:
           retention-days: 30
 
   build_windows:
-    if: github.event.inputs.build_windows == 'true' || github.event_name == 'push' || github.event_name == 'release'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.16.0'
+          node-version: '22.17.0'
           cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
       - name: Install dependencies
         run: |
-          npm install
-          cd client
-          npm install
-          cd ..
-          cd server
-          npm install
-          cd ..
+          npm ci
+          npm ci --prefix client
+          npm ci --prefix server
       - name: Build package
         run: npm run package:windows
         env:
@@ -96,7 +95,7 @@ jobs:
           retention-days: 30
 
   build_docker:
-    if: github.event.inputs.build_docker == 'true' || github.event_name == 'push' || github.event_name == 'release'
+    if: github.repository == 'GSManagerXZ/GameServerManager' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_docker))
     runs-on: ubuntu-latest
     steps:
       # 第一步：检出代码
@@ -127,13 +126,13 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            xiaozhu674/gameservermanager:3.12.0
-            xiaozhu674/gameservermanager:latest
+            xiaozhu674/gameservermanager:${{ github.event_name == 'push' && github.ref_name || format('manual-{0}', github.run_number) }}
+            ${{ github.event_name == 'push' && !contains(github.ref_name, '-') && 'xiaozhu674/gameservermanager:latest' || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   build_docker_arm:
-    if: github.event.inputs.build_docker_arm == 'true'
+    if: github.repository == 'GSManagerXZ/GameServerManager' && github.event_name == 'workflow_dispatch' && inputs.build_docker_arm
     runs-on: ubuntu-latest
     steps:
       # 第一步：检出代码
@@ -164,15 +163,17 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            xiaozhu674/gameservermanager:3.12.0-arm64-beta
+            xiaozhu674/gameservermanager:manual-${{ github.run_number }}-arm64-beta
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   # 创建发布版本（仅在推送标签时触发）
   create_release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build_linux, build_windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
