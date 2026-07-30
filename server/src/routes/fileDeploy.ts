@@ -438,13 +438,13 @@ router.post('/deploy', authenticateToken, async (req: Request, res: Response) =>
     if (sourceType === 'upload') {
       uploadSession = uploadSessions.get(req.body.uploadSessionId)
       if (!uploadSession) throw new Error('上传会话不存在或已过期')
+
+      // Claim the single-use upload synchronously, before any asynchronous
+      // filesystem work can let another request capture the same session.
+      uploadSessions.delete(uploadSession.id)
+
       const archivePath = path.join(uploadSession.directory, uploadSession.fileName)
       if (!await fs.pathExists(archivePath)) throw new Error('上传的压缩包不存在')
-
-      // An upload is a single-use resource. Claim it before yielding to the
-      // background deployment so duplicate requests cannot extract and remove
-      // the same archive concurrently.
-      uploadSessions.delete(uploadSession.id)
     }
 
     const requestedDeploymentId = typeof req.body.deploymentId === 'string' ? req.body.deploymentId.trim() : ''
