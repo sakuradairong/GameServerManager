@@ -175,9 +175,12 @@ const GameDeploymentPage: React.FC = () => {
   const [steamBranches, setSteamBranches] = useState<SteamBranchInfo[]>([])
   const [selectedSteamBranch, setSelectedSteamBranch] = useState('public')
   const [steamBranchesLoading, setSteamBranchesLoading] = useState(false)
+  const [steamBranchesError, setSteamBranchesError] = useState('')
   const [steamBranchPassword, setSteamBranchPassword] = useState('')
   const [launchArguments, setLaunchArguments] = useState('')
   const steamBranchRequestId = useRef(0)
+  const installModalRequestId = useRef(0)
+  const installingRef = useRef(false)
   
   // 实例更新确认弹窗相关状态
   const [showInstanceUpdateDialog, setShowInstanceUpdateDialog] = useState(false)
@@ -2548,44 +2551,66 @@ const GameDeploymentPage: React.FC = () => {
   // 自动生成和更新SteamCMD命令
   useEffect(() => {
     if (showInstallModal && selectedGame) {
-      const forceInstallDir = `force_install_dir "${installPath.trim()}"`
+      const quotePreviewArgument = (value: string) => `"${value.replace(/"/g, '\\"')}"`
+      const forceInstallDir = `force_install_dir ${quotePreviewArgument(installPath.trim())}`
 
       const loginCommand = useAnonymous
         ? 'login anonymous'
-        : `login ${steamUsername.trim()} ${steamPassword.trim()}`
+        : `login ${quotePreviewArgument(steamUsername.trim())} ********`
+
+      const normalizedBranch = selectedSteamBranch.trim() || 'public'
+      const branchArguments = normalizedBranch === 'public'
+        ? ''
+        : ` -beta ${quotePreviewArgument(normalizedBranch)}${steamBranchPassword.trim() ? ' -betapassword ********' : ''}`
 
       const appUpdateCommand = validateGameIntegrity
-        ? `app_update ${selectedGame.info.appid} validate`
-        : `app_update ${selectedGame.info.appid}`
+        ? `app_update ${selectedGame.info.appid}${branchArguments} validate`
+        : `app_update ${selectedGame.info.appid}${branchArguments}`
 
       // force_install_dir 必须在 login 之前，否则 SteamCMD 会报错
       const fullCommand = `steamcmd +${forceInstallDir} +${loginCommand} +${appUpdateCommand} +quit`
       setSteamcmdCommand(fullCommand)
     }
-  }, [showInstallModal, selectedGame, useAnonymous, steamUsername, steamPassword, validateGameIntegrity, installPath])
+  }, [showInstallModal, selectedGame, useAnonymous, steamUsername, validateGameIntegrity, installPath, selectedSteamBranch, steamBranchPassword])
 
-  const loadSteamBranches = async (appId: string) => {
+  const loadSteamBranches = async (
+    appId: string,
+    options: {
+      forceRefresh?: boolean
+      preferredBranch?: string
+      credentials?: { steamUsername: string; steamPassword: string }
+    } = {}
+  ) => {
     const requestId = ++steamBranchRequestId.current
     try {
       setSteamBranchesLoading(true)
-      const response = await apiClient.getSteamBranches(appId)
+      setSteamBranchesError('')
+      const response = await apiClient.getSteamBranches(appId, {
+        forceRefresh: options.forceRefresh,
+        ...options.credentials
+      })
       if (requestId !== steamBranchRequestId.current) return
       if (response.success) {
         const branches = response.data || []
         setSteamBranches(branches)
-        setSelectedSteamBranch(branches.find(branch => branch.isDefault)?.name || 'public')
+        setSelectedSteamBranch(currentBranch => (
+          currentBranch.trim()
+          || options.preferredBranch?.trim()
+          || branches.find(branch => branch.isDefault)?.name
+          || 'public'
+        ))
         return
       }
-      throw new Error(response.message || '无法获取Steam分支')
+      throw new Error(response.message || response.error || '无法获取Steam分支')
     } catch (error: any) {
       if (requestId !== steamBranchRequestId.current) return
-      console.warn('获取Steam分支失败，使用默认public分支:', error)
+      console.warn('获取Steam分支失败，可继续使用手动分支:', error)
       setSteamBranches([])
-      setSelectedSteamBranch('public')
+      setSteamBranchesError(error.message || error.error || '未能获取Steam分支')
       addNotification({
         type: 'warning',
         title: '分支列表不可用',
-        message: error.message || '未能获取Steam分支，将使用public分支'
+        message: error.message || error.error || '未能获取Steam分支，可手动输入分支名称后继续'
       })
     } finally {
       if (requestId === steamBranchRequestId.current) {
@@ -2596,6 +2621,8 @@ const GameDeploymentPage: React.FC = () => {
 
   // 打开安装对话框
   const handleInstallGame = async (gameKey: string, gameInfo: GameInfo) => {
+    const requestId = ++installModalRequestId.current
+
     // 检查游戏是否支持当前平台
     if (gameInfo.supportedOnCurrentPlatform === false) {
       addNotification({
@@ -2627,6 +2654,7 @@ const GameDeploymentPage: React.FC = () => {
       // 检查内存需求
       try {
         const memoryCheckResponse = await apiClient.checkGameMemory(gameKey)
+        if (requestId !== installModalRequestId.current) return
         const memoryWarning = (memoryCheckResponse as any).memoryWarning
         if (memoryCheckResponse.success && memoryWarning) {
           // 显示内存警告对话框
@@ -2651,40 +2679,48 @@ const GameDeploymentPage: React.FC = () => {
         // 内存检查失败不应阻止安装流程
       }
 
+      if (requestId !== installModalRequestId.current) return
       // 直接打开安装对话框
-      openInstallModal(gameKey, gameInfo)
+      await openInstallModal(gameKey, gameInfo, requestId)
     } finally {
       // 清除检测环境状态
-      setCheckingEnvironment(null)
+      if (requestId === installModalRequestId.current) {
+        setCheckingEnvironment(null)
+      }
     }
   }
 
 
 
   // 打开安装对话框的通用函数
-  const openInstallModal = async (gameKey: string, gameInfo: GameInfo) => {
+  const openInstallModal = async (gameKey: string, gameInfo: GameInfo, requestId: number) => {
     const defaultInstanceName = gameInfo.game_nameCN
     setUseAnonymous(true)
     setSteamUsername('')
     setSteamPassword('')
     setLaunchArguments('')
     setSteamBranchPassword('')
-    void loadSteamBranches(gameInfo.appid)
+    setSteamBranches([])
+    setSteamBranchesError('')
+    setSelectedSteamBranch('public')
     
     // 检查是否存在同名实例
     try {
       const instancesResponse = await apiClient.getInstances()
+      if (requestId !== installModalRequestId.current) return
       if (instancesResponse.success && instancesResponse.data) {
         const existingInstance = instancesResponse.data.find(
           (instance: any) => instance.name === defaultInstanceName
         )
         
         if (existingInstance) {
+          const existingBranch = existingInstance.steam?.branch || 'public'
           // 找到同名实例，显示确认弹窗
           setSelectedGame({ key: gameKey, info: gameInfo })
           setInstanceName(defaultInstanceName)
           setInstallPath(generatePath(gameKey))
           setExistingInstanceId(existingInstance.id)
+          setSelectedSteamBranch(existingBranch)
           setShowInstanceUpdateDialog(true)
           // 使用requestAnimationFrame确保DOM渲染完成后再触发动画
           requestAnimationFrame(() => {
@@ -2696,6 +2732,7 @@ const GameDeploymentPage: React.FC = () => {
         }
       }
     } catch (error) {
+      if (requestId !== installModalRequestId.current) return
       console.error('检查实例失败:', error)
       // 检查失败不应阻止安装流程，继续正常流程
     }
@@ -2705,6 +2742,7 @@ const GameDeploymentPage: React.FC = () => {
     setInstanceName(defaultInstanceName)
     setInstallPath(generatePath(gameKey))
     setShowInstallModal(true)
+    void loadSteamBranches(gameInfo.appid, { preferredBranch: 'public' })
     // 使用requestAnimationFrame确保DOM渲染完成后再触发动画
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -2715,6 +2753,7 @@ const GameDeploymentPage: React.FC = () => {
 
   // 关闭安装对话框
   const handleCloseInstallModal = () => {
+    installModalRequestId.current++
     steamBranchRequestId.current++
     setInstallModalAnimating(false)
     setTimeout(() => {
@@ -2723,6 +2762,7 @@ const GameDeploymentPage: React.FC = () => {
       setShowAdvanced(false) // 重置高级选项展开状态
       setSteamcmdCommand('') // 重置SteamCMD命令
       setSteamBranches([])
+      setSteamBranchesError('')
       setSelectedSteamBranch('public')
       setSteamBranchPassword('')
       setLaunchArguments('')
@@ -2734,10 +2774,15 @@ const GameDeploymentPage: React.FC = () => {
   
   // 关闭实例更新确认弹窗
   const handleCloseInstanceUpdateDialog = () => {
+    installModalRequestId.current++
+    steamBranchRequestId.current++
     setInstanceUpdateDialogAnimating(false)
     setTimeout(() => {
       setShowInstanceUpdateDialog(false)
       setExistingInstanceId(null)
+      setSteamBranches([])
+      setSteamBranchesError('')
+      setSelectedSteamBranch('public')
       setUpdateInstanceInfo(false)
       setResetSteamManifest(false) // 重置重置Steam游戏文件清单标志
       setCheckingEnvironment(null) // 清除检测环境状态
@@ -2760,6 +2805,9 @@ const GameDeploymentPage: React.FC = () => {
     // 打开安装对话框
     setTimeout(() => {
       setShowInstallModal(true)
+      if (selectedGame) {
+        void loadSteamBranches(selectedGame.info.appid, { preferredBranch: selectedSteamBranch })
+      }
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setInstallModalAnimating(true)
@@ -2791,23 +2839,25 @@ const GameDeploymentPage: React.FC = () => {
   // 确认继续安装（忽略内存警告）
   const handleContinueInstallation = () => {
     if (memoryWarningInfo) {
+      const requestId = ++installModalRequestId.current
       handleCloseMemoryWarningModal()
       // 清除检测环境状态
       setCheckingEnvironment(null)
       // 打开安装对话框
-      openInstallModal(memoryWarningInfo.gameKey, memoryWarningInfo.gameInfo)
+      void openInstallModal(memoryWarningInfo.gameKey, memoryWarningInfo.gameInfo, requestId)
     }
   }
 
   // 确认继续安装不兼容的游戏
   const handleConfirmIncompatibleInstall = () => {
     if (pendingGameInstall) {
+      const requestId = ++installModalRequestId.current
       handleCloseCompatibilityModal()
       // 清除检测环境状态
       setCheckingEnvironment(null)
       // 延迟一点时间等待对话框关闭动画完成
       setTimeout(() => {
-        openInstallModal(pendingGameInstall.key, pendingGameInstall.info)
+        void openInstallModal(pendingGameInstall.key, pendingGameInstall.info, requestId)
       }, 350)
     }
   }
@@ -2947,11 +2997,41 @@ const GameDeploymentPage: React.FC = () => {
 
   // 开始安装游戏
   const startInstallation = async () => {
+    if (installingRef.current) return
+    if (steamBranchesLoading) {
+      addNotification({
+        type: 'warning',
+        title: '正在发现分支',
+        message: '请等待Steam分支发现完成后再开始安装'
+      })
+      return
+    }
+
     if (!selectedGame || !installPath.trim() || !instanceName.trim()) {
       addNotification({
         type: 'error',
         title: '参数错误',
         message: '请填写完整的安装信息'
+      })
+      return
+    }
+
+    const requestedBranch = selectedSteamBranch.trim()
+    if (!requestedBranch) {
+      addNotification({
+        type: 'error',
+        title: '参数错误',
+        message: '请输入Steam分支名称'
+      })
+      return
+    }
+
+    const selectedBranchInfo = steamBranches.find(branchInfo => branchInfo.name === requestedBranch)
+    if (selectedBranchInfo?.requiresPassword && !steamBranchPassword.trim()) {
+      addNotification({
+        type: 'error',
+        title: '缺少分支密码',
+        message: '该Steam测试分支需要输入密码'
       })
       return
     }
@@ -2970,25 +3050,27 @@ const GameDeploymentPage: React.FC = () => {
     const currentUpdateInstanceInfo = updateInstanceInfo
     const currentResetSteamManifest = resetSteamManifest
 
+    installingRef.current = true
     try {
+      setInstalling(true)
       // 调用后端API开始游戏安装，使用高级选项中的命令
-       const response = await apiClient.installGame({
-          gameKey: selectedGame.key,
-          gameName: selectedGame.info.game_nameCN,
-          appId: selectedGame.info.appid,
-          installPath: installPath.trim(),
-          instanceName: instanceName.trim(),
-          useAnonymous,
-          steamUsername: useAnonymous ? undefined : steamUsername.trim(),
-          steamPassword: useAnonymous ? undefined : steamPassword.trim(),
-          existingInstanceId: currentExistingInstanceId || undefined,
-          updateInstanceInfo: currentUpdateInstanceInfo,
-          resetSteamManifest: currentResetSteamManifest,
-          branch: selectedSteamBranch,
-          betaPassword: steamBranchPassword.trim() || undefined,
+      const response = await apiClient.installGame({
+        gameKey: selectedGame.key,
+        gameName: selectedGame.info.game_nameCN,
+        appId: selectedGame.info.appid,
+        installPath: installPath.trim(),
+        instanceName: instanceName.trim(),
+        useAnonymous,
+        steamUsername: useAnonymous ? undefined : steamUsername.trim(),
+        steamPassword: useAnonymous ? undefined : steamPassword.trim(),
+        existingInstanceId: currentExistingInstanceId || undefined,
+        updateInstanceInfo: currentUpdateInstanceInfo,
+        resetSteamManifest: currentResetSteamManifest,
+        branch: requestedBranch,
+        betaPassword: steamBranchPassword.trim() || undefined,
         validateGameIntegrity,
         launchArgs: launchArguments.trim() || undefined
-        })
+      })
 
       if (response.success && response.data?.terminalSessionId) {
         handleCloseInstallModal()
@@ -3004,6 +3086,9 @@ const GameDeploymentPage: React.FC = () => {
         title: '安装失败',
         message: error.message || '无法开始游戏安装'
       })
+    } finally {
+      installingRef.current = false
+      setInstalling(false)
     }
   }
 
@@ -5721,7 +5806,8 @@ const GameDeploymentPage: React.FC = () => {
               </h3>
               <button
                 onClick={handleCloseInstallModal}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                disabled={installing}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -5737,7 +5823,8 @@ const GameDeploymentPage: React.FC = () => {
                   type="text"
                   value={instanceName}
                   onChange={(e) => setInstanceName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  disabled={installing}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
                   placeholder="输入实例名称"
                 />
               </div>
@@ -5752,12 +5839,15 @@ const GameDeploymentPage: React.FC = () => {
                     type="text"
                     value={installPath}
                     onChange={(e) => setInstallPath(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={installing}
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
                     placeholder="例如/home/steam/games/xxx 或 D:\Games"
                   />
                   <button
+                    type="button"
                     onClick={selectInstallPath}
-                    className="px-3 py-2 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+                    disabled={installing}
+                    className="px-3 py-2 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-60 transition-colors"
                   >
                     <FolderOpen className="w-4 h-4" />
                   </button>
@@ -5769,40 +5859,70 @@ const GameDeploymentPage: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   服务器版本（Steam分支）
                 </label>
-                <select
-                  value={selectedSteamBranch}
-                  onChange={(e) => {
-                    setSelectedSteamBranch(e.target.value)
-                    setSteamBranchPassword('')
-                  }}
-                  disabled={steamBranchesLoading}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
-                >
-                  {steamBranchesLoading && <option value="public">正在查询Steam分支...</option>}
-                  {!steamBranchesLoading && steamBranches.length === 0 && <option value="public">public（默认稳定分支）</option>}
-                  {!steamBranchesLoading && steamBranches.map(branchInfo => (
-                    <option key={branchInfo.name} value={branchInfo.name}>
-                      {branchInfo.name}
-                      {branchInfo.description ? ` - ${branchInfo.description}` : ''}
-                      {branchInfo.buildId ? ` (Build ${branchInfo.buildId})` : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Steam分支是服务端发布通道，并不一定等同于语义化版本号。
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    list="steam-install-branch-options"
+                    value={selectedSteamBranch}
+                    onChange={(e) => {
+                      setSelectedSteamBranch(e.target.value)
+                      setSteamBranchPassword('')
+                    }}
+                    disabled={installing}
+                    className="min-w-0 flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
+                    placeholder={steamBranchesLoading ? '正在发现可见分支...' : '输入Steam分支名称'}
+                  />
+                  <datalist id="steam-install-branch-options">
+                    {steamBranches.map(branchInfo => (
+                      <option
+                        key={branchInfo.name}
+                        value={branchInfo.name}
+                        label={`${branchInfo.description || branchInfo.name}${branchInfo.buildId ? ` (Build ${branchInfo.buildId})` : ''}`}
+                      />
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadSteamBranches(selectedGame.info.appid, {
+                        forceRefresh: true,
+                        preferredBranch: selectedSteamBranch,
+                        credentials: useAnonymous ? undefined : {
+                          steamUsername: steamUsername.trim(),
+                          steamPassword
+                        }
+                      })
+                    }}
+                    disabled={steamBranchesLoading || installing || (!useAnonymous && (!steamUsername.trim() || !steamPassword))}
+                    className="w-10 h-10 flex-shrink-0 inline-flex items-center justify-center bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={useAnonymous ? '重新发现Steam分支' : '使用当前Steam账户重新发现分支'}
+                    aria-label="重新发现Steam分支"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${steamBranchesLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+                <p className={`text-xs mt-1 ${steamBranchesError ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                  {steamBranchesLoading
+                    ? '正在发现可见分支...'
+                    : steamBranchesError
+                    ? `${steamBranchesError}；仍可手动输入已知分支`
+                    : `已发现 ${steamBranches.length} 个可见分支；私有分支可直接输入名称`}
                 </p>
               </div>
 
-              {steamBranches.find(branchInfo => branchInfo.name === selectedSteamBranch)?.requiresPassword && (
+              {Boolean(selectedSteamBranch.trim()) && selectedSteamBranch.trim() !== 'public' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    分支密码
+                    {steamBranches.find(branchInfo => branchInfo.name === selectedSteamBranch.trim())?.requiresPassword
+                      ? '分支密码'
+                      : '分支密码（可选）'}
                   </label>
                   <input
                     type="password"
                     value={steamBranchPassword}
                     onChange={(e) => setSteamBranchPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={installing}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
                     placeholder="输入该Steam测试分支的密码"
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -5824,7 +5944,8 @@ const GameDeploymentPage: React.FC = () => {
                       id="useAnonymous"
                       checked={useAnonymous}
                       onChange={(e) => setUseAnonymous(e.target.checked)}
-                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                      disabled={installing}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600 disabled:opacity-60"
                     />
                     <label htmlFor="useAnonymous" className="text-sm text-gray-700 dark:text-gray-300">
                       使用匿名账户
@@ -5842,7 +5963,8 @@ const GameDeploymentPage: React.FC = () => {
                           type="text"
                           value={steamUsername}
                           onChange={(e) => setSteamUsername(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          disabled={installing}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
                           placeholder="输入Steam用户名"
                         />
                       </div>
@@ -5854,10 +5976,14 @@ const GameDeploymentPage: React.FC = () => {
                           type="password"
                           value={steamPassword}
                           onChange={(e) => setSteamPassword(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          disabled={installing}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-60"
                           placeholder="输入Steam密码"
                         />
                       </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        面板不会将账户凭据写入实例配置；SteamCMD 可能在当前机器保留授权状态。
+                      </p>
                     </div>
                   )}
                 </div>
@@ -5871,7 +5997,8 @@ const GameDeploymentPage: React.FC = () => {
                   type="text"
                   value={launchArguments}
                   onChange={(e) => setLaunchArguments(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm"
+                  disabled={installing}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm disabled:opacity-60"
                   placeholder="输入附加到服务器启动命令后的参数"
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -5909,7 +6036,8 @@ const GameDeploymentPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  disabled={installing}
+                  className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:opacity-60 transition-colors"
                 >
                   <span>高级选项</span>
                   <svg
@@ -5931,7 +6059,8 @@ const GameDeploymentPage: React.FC = () => {
                         id="validateGameIntegrity"
                         checked={validateGameIntegrity}
                         onChange={(e) => setValidateGameIntegrity(e.target.checked)}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                        disabled={installing}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600 disabled:opacity-60"
                         title="启用此选项将在安装命令中添加 validate 参数，用于校验游戏文件完整性"
                       />
                       <label
@@ -5950,12 +6079,12 @@ const GameDeploymentPage: React.FC = () => {
                       <textarea
                         value={steamcmdCommand}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm"
-                        placeholder="SteamCMD 命令将在这里显示，您可以修改后执行"
+                        placeholder="SteamCMD 命令预览"
                         rows={4}
                         readOnly
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        命令由服务器根据安装路径、账户、分支与校验选项安全生成；预览中的账户凭据仅保留在当前页面内存中。
+                        账户密码与分支密码已脱敏；实际命令由服务器生成。
                       </p>
                     </div>
                   </div>
@@ -5966,7 +6095,8 @@ const GameDeploymentPage: React.FC = () => {
             <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 dark:border-gray-700">
               <button
                 onClick={handleCloseInstallModal}
-                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+                disabled={installing}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors"
               >
                 取消
               </button>
@@ -5975,14 +6105,16 @@ const GameDeploymentPage: React.FC = () => {
                 disabled={
                   !installPath.trim() ||
                   !instanceName.trim() ||
+                  !selectedSteamBranch.trim() ||
                   (!useAnonymous && (!steamUsername.trim() || !steamPassword.trim())) ||
                   steamBranchesLoading ||
-                  Boolean(steamBranches.find(branchInfo => branchInfo.name === selectedSteamBranch)?.requiresPassword && !steamBranchPassword.trim())
+                  installing ||
+                  Boolean(steamBranches.find(branchInfo => branchInfo.name === selectedSteamBranch.trim())?.requiresPassword && !steamBranchPassword.trim())
                 }
                 className="px-4 py-2 disabled:bg-gray-400 text-white rounded-lg transition-colors flex items-center space-x-2 bg-blue-600 hover:bg-blue-700"
               >
-                <Download className="w-4 h-4" />
-                <span>开始安装</span>
+                {installing ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                <span>{installing ? '正在启动...' : '开始安装'}</span>
               </button>
             </div>
           </div>

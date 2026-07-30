@@ -8,7 +8,7 @@ import http from 'http'
 import { fileURLToPath } from 'url'
 import { TerminalManager } from '../modules/terminal/TerminalManager.js'
 import { InstanceManager } from '../modules/instance/InstanceManager.js'
-import { SteamCMDManager } from '../modules/steamcmd/SteamCMDManager.js'
+import { SteamCMDManager, type SteamBranchQueryOptions } from '../modules/steamcmd/SteamCMDManager.js'
 import { ConfigManager } from '../modules/config/ConfigManager.js'
 import logger from '../utils/logger.js'
 import { authenticateToken } from '../middleware/auth.js'
@@ -42,10 +42,9 @@ function getSteamUpdateArguments(appId: string, branch?: string, betaPassword?: 
 
   if (normalizedBranch !== 'public') {
     args.push('-beta', normalizedBranch)
-  }
-
-  if (betaPassword?.trim()) {
-    args.push('-betapassword', betaPassword.trim())
+    if (betaPassword?.trim()) {
+      args.push('-betapassword', betaPassword.trim())
+    }
   }
 
   if (validate) {
@@ -146,6 +145,27 @@ export function setGameDeploymentManagers(
   instanceManager = instance
   steamcmdManager = steamcmd
   configManager = config
+}
+
+async function respondWithSteamBranches(
+  res: Response,
+  appId: string,
+  options: SteamBranchQueryOptions = {}
+) {
+  try {
+    const branches = await steamcmdManager.getAppBranches(appId, options)
+    res.json({
+      success: true,
+      data: branches
+    })
+  } catch (error: any) {
+    logger.error('查询Steam分支失败:', error)
+    res.status(500).json({
+      success: false,
+      error: '查询Steam分支失败',
+      message: error.message
+    })
+  }
 }
 
 // 获取可安装的游戏列表
@@ -346,36 +366,57 @@ router.post('/check-memory', authenticateToken, async (req: Request, res: Respon
 
 // 查询Steam应用分支
 router.get('/steam/branches/:appId', authenticateToken, async (req: Request, res: Response) => {
-  try {
-    const appId = String(req.params.appId || '').trim()
-    if (!/^\d+$/.test(appId)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Steam AppID格式无效'
-      })
-    }
-
-    const branches = await steamcmdManager.getAppBranches(appId)
-
-    res.json({
-      success: true,
-      data: branches
-    })
-  } catch (error: any) {
-    logger.error('查询Steam分支失败:', error)
-    res.status(500).json({
+  const appId = String(req.params.appId || '').trim()
+  if (!/^\d{1,10}$/.test(appId) || Number(appId) > 0xFFFFFFFF) {
+    return res.status(400).json({
       success: false,
-      error: '查询Steam分支失败',
-      message: error.message
+      error: 'Steam AppID格式无效'
     })
   }
+
+  const refreshValue = String(req.query.refresh || '').toLowerCase()
+  await respondWithSteamBranches(res, appId, {
+    forceRefresh: refreshValue === '1' || refreshValue === 'true'
+  })
+})
+
+// 使用请求内Steam账户查询受限应用分支，凭据不进入面板配置或分支缓存
+router.post('/steam/branches/:appId', authenticateToken, async (req: Request, res: Response) => {
+  const appId = String(req.params.appId || '').trim()
+  if (!/^\d{1,10}$/.test(appId) || Number(appId) > 0xFFFFFFFF) {
+    return res.status(400).json({
+      success: false,
+      error: 'Steam AppID格式无效'
+    })
+  }
+
+  const steamUsername = typeof req.body?.steamUsername === 'string' ? req.body.steamUsername.trim() : ''
+  const steamPassword = typeof req.body?.steamPassword === 'string' ? req.body.steamPassword : ''
+  if (!steamUsername || !steamPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Steam账户信息不完整'
+    })
+  }
+  if (steamUsername.length > 128 || steamPassword.length > 256 || /[\r\n]/.test(steamUsername) || /[\r\n]/.test(steamPassword)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Steam账户信息格式无效'
+    })
+  }
+
+  await respondWithSteamBranches(res, appId, {
+    forceRefresh: Boolean(req.body?.forceRefresh),
+    steamUsername,
+    steamPassword
+  })
 })
 
 // 更新Steam实例服务端文件
 router.post('/steam/update', authenticateToken, async (req: Request, res: Response) => {
   let lockedInstanceId: string | null = null
   try {
-    const { instanceId, branch, betaPassword, validate } = req.body
+    const { instanceId, branch, betaPassword, validate, useAnonymous, steamUsername, steamPassword } = req.body
     if (!instanceId || typeof instanceId !== 'string') {
       return res.status(400).json({
         success: false,
@@ -445,25 +486,45 @@ router.post('/steam/update', authenticateToken, async (req: Request, res: Respon
       })
     }
 
-    const availableBranches = await steamcmdManager.getAppBranches(instance.steam.appId)
-    const selectedBranchInfo = availableBranches.find(branchInfo => branchInfo.name === requestedBranch)
-    if (!selectedBranchInfo) {
+    const currentInstance = instanceManager.getInstance(instance.id)
+    if (!currentInstance || (currentInstance.status !== 'stopped' && currentInstance.status !== 'error')) {
       return res.status(400).json({
         success: false,
-        error: '所选Steam分支不存在'
-      })
-    }
-    if (selectedBranchInfo.requiresPassword && !requestedBetaPassword) {
-      return res.status(400).json({
-        success: false,
-        error: '该Steam分支需要密码'
+        error: '请先停止实例再更新服务端'
       })
     }
 
+    const shouldUseAnonymous = useAnonymous !== false
+    const requestedSteamUsername = typeof steamUsername === 'string' ? steamUsername.trim() : ''
+    const requestedSteamPassword = typeof steamPassword === 'string' ? steamPassword : ''
+    if (!shouldUseAnonymous) {
+      if (!requestedSteamUsername || !requestedSteamPassword) {
+        return res.status(400).json({
+          success: false,
+          error: 'Steam账户信息不完整'
+        })
+      }
+      if (
+        requestedSteamUsername.length > 128
+        || requestedSteamPassword.length > 256
+        || /[\r\n]/.test(requestedSteamUsername)
+        || /[\r\n]/.test(requestedSteamPassword)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Steam账户信息格式无效'
+        })
+      }
+    }
+
+    // 私有分支不会出现在公开AppInfo中，具体分支名和密码交由SteamCMD校验。
     const selectedBranch = requestedBranch
+    const steamLoginArguments = shouldUseAnonymous
+      ? ['+login', 'anonymous']
+      : ['+login', requestedSteamUsername, requestedSteamPassword]
     const steamcmdArgs = [
       '+force_install_dir', instance.workingDirectory,
-      '+login', 'anonymous',
+      ...steamLoginArguments,
       ...getSteamUpdateArguments(
         instance.steam.appId,
         selectedBranch,
@@ -477,7 +538,7 @@ router.post('/steam/update', authenticateToken, async (req: Request, res: Respon
       executablePath: steamcmdPath,
       args: steamcmdArgs,
       workingDirectory: path.dirname(steamcmdPath),
-      redactValues: requestedBetaPassword ? [requestedBetaPassword] : []
+      redactValues: [requestedBetaPassword, requestedSteamPassword].filter(Boolean)
     })
     if (updateResult.code !== 0) {
       logger.warn(`Steam实例更新失败: ${instance.name}`, {
@@ -516,7 +577,8 @@ router.post('/steam/update', authenticateToken, async (req: Request, res: Respon
       instanceId: instance.id,
       appId: instance.steam.appId,
       branch: selectedBranch,
-      validate: Boolean(validate)
+      validate: Boolean(validate),
+      useAnonymous: shouldUseAnonymous
     })
 
     res.json({

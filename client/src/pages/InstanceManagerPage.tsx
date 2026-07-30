@@ -127,7 +127,11 @@ const InstanceManagerPage: React.FC = () => {
   const [steamUpdateBranch, setSteamUpdateBranch] = useState('public')
   const [steamUpdateBranchPassword, setSteamUpdateBranchPassword] = useState('')
   const [steamUpdateValidate, setSteamUpdateValidate] = useState(true)
+  const [steamUpdateUseAnonymous, setSteamUpdateUseAnonymous] = useState(true)
+  const [steamUpdateUsername, setSteamUpdateUsername] = useState('')
+  const [steamUpdatePassword, setSteamUpdatePassword] = useState('')
   const [steamUpdateLoadingBranches, setSteamUpdateLoadingBranches] = useState(false)
+  const [steamUpdateBranchesError, setSteamUpdateBranchesError] = useState('')
   const [steamUpdating, setSteamUpdating] = useState(false)
   const steamUpdateBranchRequestId = useRef(0)
 
@@ -722,39 +726,39 @@ const InstanceManagerPage: React.FC = () => {
     }
   }
 
-  const handleOpenSteamUpdateModal = async (instance: Instance) => {
+  const loadSteamUpdateBranches = async (
+    instance: Instance,
+    options: {
+      forceRefresh?: boolean
+      credentials?: { steamUsername: string; steamPassword: string }
+    } = {}
+  ) => {
     if (!instance.steam?.appId) return
     const requestId = ++steamUpdateBranchRequestId.current
-
-    setSteamUpdateInstance(instance)
-    setSteamUpdateBranches([])
-    setSteamUpdateBranch(instance.steam.branch || 'public')
-    setSteamUpdateBranchPassword('')
-    setSteamUpdateValidate(true)
     setSteamUpdateLoadingBranches(true)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => setSteamUpdateModalAnimating(true))
-    })
+    setSteamUpdateBranchesError('')
 
     try {
-      const response = await apiClient.getSteamBranches(instance.steam.appId)
+      const response = await apiClient.getSteamBranches(instance.steam.appId, {
+        forceRefresh: options.forceRefresh,
+        ...options.credentials
+      })
       if (requestId !== steamUpdateBranchRequestId.current) return
       if (response.success) {
         const branches = response.data || []
         setSteamUpdateBranches(branches)
-        if (!branches.some(branchInfo => branchInfo.name === (instance.steam?.branch || 'public'))) {
-          setSteamUpdateBranch(branches.find(branchInfo => branchInfo.isDefault)?.name || 'public')
-        }
       } else {
-        throw new Error(response.message || '无法获取Steam分支')
+        throw new Error(response.message || response.error || '无法获取Steam分支')
       }
     } catch (error: any) {
       if (requestId !== steamUpdateBranchRequestId.current) return
       console.warn('获取Steam分支失败:', error)
+      setSteamUpdateBranches([])
+      setSteamUpdateBranchesError(error.message || error.error || '未能获取Steam分支')
       addNotification({
         type: 'warning',
         title: '分支列表不可用',
-        message: error.message || '将继续使用实例当前分支'
+        message: error.message || error.error || '将继续使用实例当前分支，也可手动输入其他分支'
       })
     } finally {
       if (requestId === steamUpdateBranchRequestId.current) {
@@ -763,22 +767,72 @@ const InstanceManagerPage: React.FC = () => {
     }
   }
 
+  const handleOpenSteamUpdateModal = async (instance: Instance) => {
+    if (!instance.steam?.appId) return
+
+    setSteamUpdateInstance(instance)
+    setSteamUpdateBranches([])
+    setSteamUpdateBranchesError('')
+    setSteamUpdateBranch(instance.steam.branch || 'public')
+    setSteamUpdateBranchPassword('')
+    setSteamUpdateValidate(true)
+    setSteamUpdateUseAnonymous(true)
+    setSteamUpdateUsername('')
+    setSteamUpdatePassword('')
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setSteamUpdateModalAnimating(true))
+    })
+
+    await loadSteamUpdateBranches(instance)
+  }
+
   const handleCloseSteamUpdateModal = () => {
     steamUpdateBranchRequestId.current++
     setSteamUpdateModalAnimating(false)
     setTimeout(() => {
       setSteamUpdateInstance(null)
       setSteamUpdateBranches([])
+      setSteamUpdateBranchesError('')
       setSteamUpdateBranch('public')
       setSteamUpdateBranchPassword('')
       setSteamUpdateValidate(true)
+      setSteamUpdateUseAnonymous(true)
+      setSteamUpdateUsername('')
+      setSteamUpdatePassword('')
     }, 300)
   }
 
   const handleUpdateSteamServer = async () => {
     if (!steamUpdateInstance) return
+    if (steamUpdateLoadingBranches) {
+      addNotification({
+        type: 'warning',
+        title: '正在发现分支',
+        message: '请等待Steam分支发现完成后再开始更新'
+      })
+      return
+    }
 
-    const selectedBranchInfo = steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch)
+    if (!steamUpdateUseAnonymous && (!steamUpdateUsername.trim() || !steamUpdatePassword)) {
+      addNotification({
+        type: 'error',
+        title: 'Steam账户信息不完整',
+        message: '请输入Steam用户名和密码'
+      })
+      return
+    }
+
+    const requestedBranch = steamUpdateBranch.trim()
+    if (!requestedBranch) {
+      addNotification({
+        type: 'error',
+        title: '缺少分支名称',
+        message: '请输入Steam分支名称'
+      })
+      return
+    }
+
+    const selectedBranchInfo = steamUpdateBranches.find(branchInfo => branchInfo.name === requestedBranch)
     if (selectedBranchInfo?.requiresPassword && !steamUpdateBranchPassword.trim()) {
       addNotification({
         type: 'error',
@@ -792,9 +846,12 @@ const InstanceManagerPage: React.FC = () => {
       setSteamUpdating(true)
       const response = await apiClient.updateSteamInstance({
         instanceId: steamUpdateInstance.id,
-        branch: steamUpdateBranch,
+        branch: requestedBranch,
         betaPassword: steamUpdateBranchPassword.trim() || undefined,
-        validate: steamUpdateValidate
+        validate: steamUpdateValidate,
+        useAnonymous: steamUpdateUseAnonymous,
+        steamUsername: steamUpdateUseAnonymous ? undefined : steamUpdateUsername.trim(),
+        steamPassword: steamUpdateUseAnonymous ? undefined : steamUpdatePassword
       })
 
       if (!response.success || !response.data?.instance) {
@@ -804,7 +861,7 @@ const InstanceManagerPage: React.FC = () => {
       addNotification({
         type: 'success',
         title: '更新完成',
-        message: `实例 "${steamUpdateInstance.name}" 已更新到 ${steamUpdateBranch} 分支`
+        message: `实例 "${steamUpdateInstance.name}" 已更新到 ${requestedBranch} 分支`
       })
       handleCloseSteamUpdateModal()
       await fetchInstances()
@@ -2608,38 +2665,105 @@ const InstanceManagerPage: React.FC = () => {
             <div className="p-6 space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Steam账户
+                </label>
+                <div className="space-y-3">
+                  <label className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={steamUpdateUseAnonymous}
+                      onChange={(e) => setSteamUpdateUseAnonymous(e.target.checked)}
+                      disabled={steamUpdating}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>使用匿名账户</span>
+                  </label>
+                  {!steamUpdateUseAnonymous && (
+                    <div className="space-y-3 pl-6 border-l-2 border-gray-200 dark:border-gray-600">
+                      <input
+                        type="text"
+                        value={steamUpdateUsername}
+                        onChange={(e) => setSteamUpdateUsername(e.target.value)}
+                        disabled={steamUpdating}
+                        autoComplete="username"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+                        placeholder="Steam用户名"
+                      />
+                      <input
+                        type="password"
+                        value={steamUpdatePassword}
+                        onChange={(e) => setSteamUpdatePassword(e.target.value)}
+                        disabled={steamUpdating}
+                        autoComplete="current-password"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+                        placeholder="Steam密码"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        面板不会将账户凭据写入实例配置；SteamCMD 可能在当前机器保留授权状态。
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   服务器版本（Steam分支）
                 </label>
-                <select
-                  value={steamUpdateBranch}
-                  onChange={(e) => {
-                    setSteamUpdateBranch(e.target.value)
-                    setSteamUpdateBranchPassword('')
-                  }}
-                  disabled={steamUpdateLoadingBranches || steamUpdating}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
-                >
-                  {steamUpdateLoadingBranches && <option value={steamUpdateBranch}>正在查询Steam分支...</option>}
-                  {!steamUpdateLoadingBranches && steamUpdateBranches.length === 0 && (
-                    <option value={steamUpdateBranch}>{steamUpdateBranch}（当前分支）</option>
-                  )}
-                  {!steamUpdateLoadingBranches && steamUpdateBranches.map(branchInfo => (
-                    <option key={branchInfo.name} value={branchInfo.name}>
-                      {branchInfo.name}
-                      {branchInfo.description ? ` - ${branchInfo.description}` : ''}
-                      {branchInfo.buildId ? ` (Build ${branchInfo.buildId})` : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  public 为默认稳定分支；其他名称通常代表测试版或历史发布通道。
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    list="steam-update-branch-options"
+                    value={steamUpdateBranch}
+                    onChange={(e) => {
+                      setSteamUpdateBranch(e.target.value)
+                      setSteamUpdateBranchPassword('')
+                    }}
+                    disabled={steamUpdating}
+                    className="min-w-0 flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+                    placeholder={steamUpdateLoadingBranches ? '正在发现可见分支...' : '输入Steam分支名称'}
+                  />
+                  <datalist id="steam-update-branch-options">
+                    {steamUpdateBranches.map(branchInfo => (
+                      <option
+                        key={branchInfo.name}
+                        value={branchInfo.name}
+                        label={`${branchInfo.description || branchInfo.name}${branchInfo.buildId ? ` (Build ${branchInfo.buildId})` : ''}`}
+                      />
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    onClick={() => void loadSteamUpdateBranches(steamUpdateInstance, {
+                      forceRefresh: true,
+                      credentials: steamUpdateUseAnonymous ? undefined : {
+                        steamUsername: steamUpdateUsername.trim(),
+                        steamPassword: steamUpdatePassword
+                      }
+                    })}
+                    disabled={steamUpdateLoadingBranches || steamUpdating || (!steamUpdateUseAnonymous && (!steamUpdateUsername.trim() || !steamUpdatePassword))}
+                    className="w-10 h-10 flex-shrink-0 inline-flex items-center justify-center bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={steamUpdateUseAnonymous ? '重新发现Steam分支' : '使用当前Steam账户重新发现分支'}
+                    aria-label="重新发现Steam分支"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${steamUpdateLoadingBranches ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+                <p className={`text-xs mt-1 ${steamUpdateBranchesError ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                  {steamUpdateLoadingBranches
+                    ? '正在发现可见分支...'
+                    : steamUpdateBranchesError
+                    ? `${steamUpdateBranchesError}；仍可手动输入已知分支`
+                    : `已发现 ${steamUpdateBranches.length} 个可见分支；私有分支可直接输入名称`}
                 </p>
               </div>
 
-              {steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch)?.requiresPassword && (
+              {Boolean(steamUpdateBranch.trim()) && steamUpdateBranch.trim() !== 'public' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    分支密码
+                    {steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch.trim())?.requiresPassword
+                      ? '分支密码'
+                      : '分支密码（可选）'}
                   </label>
                   <input
                     type="password"
@@ -2686,7 +2810,7 @@ const InstanceManagerPage: React.FC = () => {
               </button>
               <button
                 onClick={handleUpdateSteamServer}
-                disabled={steamUpdating || steamUpdateLoadingBranches || Boolean(steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch)?.requiresPassword && !steamUpdateBranchPassword.trim())}
+                disabled={steamUpdating || steamUpdateLoadingBranches || !steamUpdateBranch.trim() || (!steamUpdateUseAnonymous && (!steamUpdateUsername.trim() || !steamUpdatePassword)) || Boolean(steamUpdateBranches.find(branchInfo => branchInfo.name === steamUpdateBranch.trim())?.requiresPassword && !steamUpdateBranchPassword.trim())}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white rounded-lg transition-colors flex items-center space-x-2"
               >
                 {steamUpdating ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}

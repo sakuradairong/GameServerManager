@@ -520,8 +520,17 @@ class ApiClient {
     return this.post('/game-deployment/install', data)
   }
 
-  async getSteamBranches(appId: string) {
-    return this.get<SteamBranchInfo[]>(`/game-deployment/steam/branches/${encodeURIComponent(appId)}`)
+  async getSteamBranches(appId: string, options: {
+    forceRefresh?: boolean
+    steamUsername?: string
+    steamPassword?: string
+  } = {}) {
+    const url = `/game-deployment/steam/branches/${encodeURIComponent(appId)}`
+    if (options.steamUsername || options.steamPassword) {
+      return this.post<SteamBranchInfo[]>(url, options)
+    }
+
+    return this.get<SteamBranchInfo[]>(options.forceRefresh ? `${url}?refresh=1` : url)
   }
 
   async updateSteamInstance(data: {
@@ -529,6 +538,9 @@ class ApiClient {
     branch: string
     betaPassword?: string
     validate?: boolean
+    useAnonymous?: boolean
+    steamUsername?: string
+    steamPassword?: string
   }) {
     return this.post<{ instance: Instance; requestedBranch: string; output?: string }>('/game-deployment/steam/update', data)
   }
