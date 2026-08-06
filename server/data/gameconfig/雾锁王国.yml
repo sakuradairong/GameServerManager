@@ -1,0 +1,410 @@
+meta:
+  game_name: "雾锁王国"
+  config_file: "enshrouded_server.json"
+  parser: "json" # 可选，默认为 configobj
+
+sections:
+    - key: ""
+      fields:
+      - name: "name"
+        display: "服务器名称"
+        default: "MyWorld"
+        type: "string"
+        description: "服务器的名字，建议设置为英文！"
+
+      - name: "saveDirectory"
+        display: "游戏存档目录"
+        default: "./savegame"
+        type: "string"
+        description: "服务器存档位置，默认为 ./savegame"
+
+      - name: "logDirectory"
+        display: "服务器日志目录"
+        default: "./logs"
+        type: "string"
+        description: "服务器日志位置，默认为 ./logs"
+
+      - name: "ip"
+        display: "服务器的IP"
+        default: "0.0.0.0"
+        type: "string"
+        description: "默认值为 0.0.0.0，强烈建议默认值"
+
+      - name: "queryPort"
+        display: "服务器端口"
+        default: "15637"
+        type: "number"
+        description: "默认值为15637，如果修改为其它值，在连接服务器时，需要带上端口号，例如1.1.1.1:25111"
+
+      - name: "slotCount"
+        display: "服务器游玩人数上线"
+        default: "16"
+        type: "number"
+        description: "默认值为16，目前游戏最多支持16人同时游玩"
+        
+      - name: "voiceChatMode"
+        display: "语音聊天模式"
+        default: "Proximity"
+        type: "select"
+        options:
+        - value: "Proximity"
+          label: "附近玩家"
+        - value: "Global"
+          label: "全局玩家"
+        description: "默认值为Proximity，为降低服务器负担，建议使用第三方语音服务。"
+
+      - name: "enableVoiceChat"
+        display: "游戏内语音聊天功能"
+        default: false
+        type: "boolean"
+        description: "是否启用游戏内置语音功能，默认为禁用"
+
+      - name: "enableTextChat"
+        display: "游戏内文字聊天"
+        default: false
+        type: "boolean"
+        description: "是否启用游戏内置文字聊天功能，默认为禁用"
+
+      - name: "gameSettingsPreset"
+        display: "游戏难度选择"
+        default: "Custom"
+        type: "select"
+        options:
+        - value: "Default"
+          label: "普通模式"
+        - value: "Relaxed"
+          label: "休闲模式"
+        - value: "Hard"
+          label: "困难模式"
+        - value: "Survival"
+          label: "生存模式"
+        - value: "Custom"
+          label: "自定义模式"
+        description: "默认值为Default，如果需要对游戏难度个性化微调，请选择 自定义模式 ，否则GameSetting的所有设定将被默认值覆盖。"
+
+      - name: "gameSettings"
+        display: "游戏设置"
+        type: "nested"
+        description: "游戏自定义难度自定义"
+        nested_fields:
+          - name: "playerHealthFactor"
+            display: "玩家生命值上限"
+            default: "1"
+            type: "number"
+            description: "默认值为1，范围0.25 - 4"
+
+          - name: "playerManaFactor"
+            display: "玩家魔力值上限"
+            default: "1"
+            type: "number"
+            description: "默认值为1，范围0.25 - 4"
+
+          - name: "playerStaminaFactor"
+            display: "玩家耐力值上限"
+            default: "1"
+            type: "number"
+            description: "默认值为1，范围0.25 - 4"
+
+          - name: "playerBodyHeatFactor"
+            display: "玩家体温变化系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整玩家体温下降/升高的速度。范围0.5 - 2"
+
+          - name: "enableDurability"
+            display: "武器工具耐久度"
+            default: true
+            type: "boolean"
+            description: "是否启用武器工具的耐久值，物品耐久为0时将无法使用。"
+
+          - name: "enableStarvingDebuff"
+            display: "启用饥饿状态减益"
+            default: true
+            type: "boolean"
+            description: "是否启用饥饿状态下的减益效果（如耐力恢复速度降低）。"
+
+          - name: "foodBuffDurationFactor"
+            display: "食物增益持续时间系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整食物提供的增益效果的持续时间。范围0.5 - 2"
+
+          - name: "fromHungerToStarving"
+            display: "饥饿到死亡的时间"
+            default: "700000000000"
+            type: "number"
+            description: "玩家从饥饿状态到死亡状态所需的时间，以纳秒 (ns) 为单位计算（10^9 纳秒 = 1 秒）。最短时间5分钟，最长20分钟"
+
+          - name: "shroudTimeFactor"
+            display: "迷雾持续时间系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整玩家在迷雾（Shroud）中可以停留的时间。更高的值可以停留更久。范围0.5 - 2"
+    
+
+          - name: "tombstoneMode"
+            display: "墓碑掉落模式"
+            default: "AddBackpackMaterials"
+            type: "select"
+            options:
+              - value: "AddBackpackMaterials"
+                label: "仅丢失背包中的材料类物品"
+              - value: "Everything"
+                label: "丢失背包中的所有物品"
+              - value: "NoTombstone"
+                label: "不生成墓碑"
+            description: "默认值为 'AddBackpackMaterials' (将背包中的材料添加到墓碑，但装备不会掉落)。Everything丢失背包中的所有物品，所有物品都会掉落到墓碑中。NoTombstone不生成墓碑，死亡后物品不会掉落"
+
+          - name: "enableGliderTurbulences"
+            display: "启用滑翔翼湍流"
+            default: true
+            type: "boolean"
+            description: "是否启用滑翔时受到的湍流影响（使滑翔更难控制）。"
+
+          - name: "weatherFrequency"
+            display: "天气变化频率"
+            default: "Normal"
+            type: "select"
+            options:
+              - value: "Disabled"
+                label: "关闭天气变化"
+              - value: "Rare"
+                label: "天气变化频率最低"
+              - value: "Normal"
+                label: "天气变化频率正常"
+              - value: "Often"
+                label: "天气变化频率频繁"
+            description: "调整游戏内天气变化的频率。"
+
+          - name: "miningDamageFactor"
+            display: "采矿伤害系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整玩家对可破坏资源（如矿物、泥土）造成的伤害。范围0.5 - 2"
+
+          - name: "plantGrowthSpeedFactor"
+            display: "植物生长速度系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整农作物和植物的生长速度。范围0.25 - 2"
+
+          - name: "resourceDropStackAmountFactor"
+            display: "资源掉落堆叠量系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整从敌人，宝箱获得的资源数量。范围0.25 - 2"
+
+          - name: "factoryProductionSpeedFactor"
+            display: "生产工具生产速度系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整熔炉等 '工厂' 的生产速度。范围0.25 - 2"
+
+          - name: "perkUpgradeRecyclingFactor"
+            display: "武器符文回收系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整回收已升级武器时返还符文。范围0 - 1"
+
+          - name: "perkCostFactor"
+            display: "武器升级花费倍率"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整武器升级所需符文的数量倍率。范围0.25 - 2"
+
+          - name: "experienceCombatFactor"
+            display: "战斗经验系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整玩家从战斗中获得的经验值。范围0.25 - 2"
+
+          - name: "experienceMiningFactor"
+            display: "采矿经验系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整玩家从采矿中获得的经验值。范围0 - 2"
+
+          - name: "experienceExplorationQuestsFactor"
+            display: "探索与任务经验系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整玩家从探索和任务中获得的经验值。范围0.25 - 2"
+
+          - name: "randomSpawnerAmount"
+            display: "敌人数量"
+            default: "Normal"
+            type: "select"
+            options:
+              - value: "Few"
+                label: "稀少"
+              - value: "Normal"
+                label: "正常"
+              - value: "Many"
+                label: "较多"
+              - value: "Extreme"
+                label: "大量"
+            description: "调整世界中随机生成的敌人数量。"
+
+          - name: "aggroPoolAmount"
+            display: "敌人同时攻击的数量"
+            default: "Normal"
+            type: "select"
+            options:
+              - value: "Few"
+                label: "少"
+              - value: "Normal"
+                label: "正常"
+              - value: "Many"
+                label: "多"
+              - value: "Extreme"
+                label: "大量"
+            description: "调整玩家被敌人同时攻击的数量。"
+
+          - name: "enemyDamageFactor"
+            display: "敌人伤害系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整所有普通敌人造成的伤害。范围0.25 - 5"
+
+          - name: "enemyHealthFactor"
+            display: "敌人生命值系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整所有普通敌人的生命值。范围0.25 - 4"
+
+          - name: "enemyStaminaFactor"
+            display: "敌人耐力值系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整所有普通敌人的耐力值，该值决定了敌人是否更容易被玩家眩晕。范围0.5 - 2"
+
+          - name: "enemyPerceptionRangeFactor"
+            display: "敌人感知范围系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整敌人发现和追踪玩家的距离。范围0.5 - 2"
+
+          - name: "bossDamageFactor"
+            display: "Boss 伤害系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整 Boss 敌人造成的伤害。范围0.2 - 5"
+
+          - name: "bossHealthFactor"
+            display: "Boss 生命值系数"
+            default: "1"
+            type: "number"
+            description: "默认值为1。调整 Boss 敌人的生命值。范围0.2 - 5"
+
+          - name: "threatBonus"
+            display: "敌人攻击频率倍率"
+            type: "number"
+            description: "默认值为1。调整敌人发动攻击的频率（不包括 Boss）。范围0.25 - 4"
+
+
+          - name: "pacifyAllEnemies"
+            display: "和平模式？"
+            default: false
+            type: "boolean"
+            description: "是否使所有敌人处于非攻击状态，false下敌人受到玩家伤害时进入敌对状态。"
+
+          - name: "tamingStartleRepercussion"
+            display: "驯服惊吓后果"
+            default: "LoseSomeProgress"
+            type: "select"
+            options:
+              - value: "KeepProgress"
+                label: "保持进度"
+              - value: "LoseSomeProgress"
+                label: "损失部分进度"
+              - value: "LoseAllProgress"
+                label: "丢失所有进度"
+            description: "当玩家在驯服动物时惊吓到它们时，驯服进度受到的影响。"
+
+          - name: "dayTimeDuration"
+            display: "白天持续时间"
+            default: "1800000000000"
+            type: "number"
+            description: "一天中白天的时间长度，以纳秒 (ns) 为单位计算（默认约 30 分钟）。范围2分钟 - 60分钟，请自行转换"
+
+          - name: "nightTimeDuration"
+            display: "夜晚持续时间"
+            default: "900000000000"
+            type: "number"
+            description: "一天中夜晚的时间长度，以纳秒 (ns) 为单位计算（默认约 15 分钟）。范围2分钟 - 60分钟，请自行转换"
+
+          - name: "curseModifier"
+            display: "迷雾诅咒修改器"
+            default: "Normal"
+            type: "select"
+            options:
+              - value: "Easy"
+                label: "低"
+              - value: "Normal"
+                label: "正常"
+              - value: "Hard"
+                label: "高"
+            description: "调整游戏中的诅咒强度和难度。高难度是正常难度的两倍，低约等于关闭"
+
+      - name: "userGroups"
+        display: "用户分组"
+        type: "array"
+        description: "玩家权限分组，支持动态增删。每个分组需设置独立密码与权限。"
+        item_fields:
+          - name: "name"
+            display: "分组名称"
+            type: "string"
+            default: "Guest"
+            description: "分组显示名称，如 Admin、Friend、Guest"
+          - name: "password"
+            display: "分组密码"
+            type: "string"
+            default: ""
+            description: "使用该分组权限加入服务器所需的密码"
+          - name: "canKickBan"
+            display: "踢人/封禁权限"
+            type: "boolean"
+            default: false
+            description: "是否允许踢出或封禁其他玩家"
+          - name: "canAccessInventories"
+            display: "访问容器权限"
+            type: "boolean"
+            default: false
+            description: "是否允许使用箱子等容器"
+          - name: "canEditBase"
+            display: "编辑基地权限"
+            type: "boolean"
+            default: false
+            description: "是否允许在玩家基地内编辑"
+          - name: "canExtendBase"
+            display: "扩展基地权限"
+            type: "boolean"
+            default: false
+            description: "是否允许扩展玩家基地范围"
+          - name: "reservedSlots"
+            display: "预留槽位"
+            type: "number"
+            default: 0
+            description: "为该分组预留的服务器槽位数量，0 表示不预留"
+        default:
+          - name: "Admin"
+            password: ""
+            canKickBan: true
+            canAccessInventories: true
+            canEditBase: true
+            canExtendBase: true
+            reservedSlots: 0
+          - name: "Friend"
+            password: ""
+            canKickBan: false
+            canAccessInventories: true
+            canEditBase: true
+            canExtendBase: false
+            reservedSlots: 0
+          - name: "Guest"
+            password: ""
+            canKickBan: false
+            canAccessInventories: false
+            canEditBase: false
+            canExtendBase: false
+            reservedSlots: 0

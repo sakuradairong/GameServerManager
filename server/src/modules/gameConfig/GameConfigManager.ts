@@ -10,10 +10,11 @@ export interface GameConfigField {
   name: string
   display: string
   default: any
-  type: 'string' | 'number' | 'boolean' | 'select' | 'nested'
+  type: 'string' | 'number' | 'boolean' | 'select' | 'nested' | 'raw_json' | 'array'
   description?: string
   options?: Array<{ value: any; label: string }>
   nested_fields?: GameConfigField[]
+  item_fields?: GameConfigField[]
 }
 
 export interface GameConfigSection {
@@ -245,6 +246,10 @@ export class GameConfigManager {
             nestedValues[nestedField.name] = nestedField.default
           }
           result[section.key][field.name] = nestedValues
+        } else if (field.type === 'array') {
+          result[section.key][field.name] = this.getDefaultArrayValue(field)
+        } else if (field.type === 'raw_json') {
+          result[section.key][field.name] = field.default ?? null
         } else {
           result[section.key][field.name] = field.default
         }
@@ -396,7 +401,7 @@ export class GameConfigManager {
           if (field.type === 'nested' && field.nested_fields) {
             // 处理嵌套字段
             const nestedValue = sectionData[field.name]
-            if (nestedValue !== undefined && typeof nestedValue === 'object') {
+            if (nestedValue !== undefined && typeof nestedValue === 'object' && !Array.isArray(nestedValue)) {
               // JSON格式的嵌套字段本身就是对象，直接使用
               result[section.key][field.name] = nestedValue
             } else {
@@ -407,6 +412,14 @@ export class GameConfigManager {
               }
               result[section.key][field.name] = nestedDefaults
             }
+          } else if (field.type === 'array') {
+            const value = sectionData[field.name]
+            result[section.key][field.name] = Array.isArray(value)
+              ? value
+              : this.getDefaultArrayValue(field)
+          } else if (field.type === 'raw_json') {
+            const value = sectionData[field.name]
+            result[section.key][field.name] = value !== undefined ? value : (field.default ?? null)
           } else {
             // 处理普通字段
             const value = sectionData[field.name]
@@ -670,6 +683,8 @@ export class GameConfigManager {
             ...this.cloneRawObject(existingNested),
             ...value
           }
+        } else if (field.type === 'array' || field.type === 'raw_json') {
+          targetContainer[field.name] = this.cloneRawObject(value)
         } else {
           targetContainer[field.name] = value
         }
@@ -677,6 +692,34 @@ export class GameConfigManager {
     }
 
     return mergedConfig
+  }
+
+  private getDefaultArrayValue(field: GameConfigField): RawConfigValue[] {
+    if (Array.isArray(field.default)) {
+      return this.cloneRawObject(field.default)
+    }
+
+    if (!field.item_fields || field.item_fields.length === 0) {
+      return []
+    }
+
+    return [this.buildDefaultArrayItem(field.item_fields)]
+  }
+
+  private buildDefaultArrayItem(itemFields: GameConfigField[]): RawConfigObject {
+    const item: RawConfigObject = {}
+
+    for (const itemField of itemFields) {
+      if (itemField.type === 'nested' && itemField.nested_fields) {
+        item[itemField.name] = this.buildDefaultArrayItem(itemField.nested_fields)
+      } else if (itemField.type === 'array') {
+        item[itemField.name] = this.getDefaultArrayValue(itemField)
+      } else {
+        item[itemField.name] = itemField.default
+      }
+    }
+
+    return item
   }
 
   private isPlainObject(value: unknown): value is RawConfigObject {

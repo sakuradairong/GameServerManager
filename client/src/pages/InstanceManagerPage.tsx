@@ -28,6 +28,7 @@ import { useSystemStore } from '@/stores/systemStore'
 import apiClient from '@/utils/api'
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
 import { ConfirmStartDialog } from '@/components/ConfirmStartDialog'
+import { GameConfigArrayField, GameConfigRawJsonField } from '@/components/GameConfigFieldExtras'
 import { StartErrorDialog } from '@/components/StartErrorDialog'
 import { CreateConfigDialog } from '@/components/CreateConfigDialog'
 import SearchableSelect from '@/components/SearchableSelect'
@@ -477,6 +478,49 @@ const InstanceManagerPage: React.FC = () => {
 
     const filledData = { ...currentData }
 
+    const applyFieldDefaults = (sectionKey: string, field: any) => {
+      if (field.type === 'nested' && field.nested_fields) {
+        if (!filledData[sectionKey][field.name]) {
+          filledData[sectionKey][field.name] = {}
+        }
+
+        field.nested_fields.forEach((nestedField: any) => {
+          if (filledData[sectionKey][field.name][nestedField.name] === undefined && nestedField.default !== undefined) {
+            filledData[sectionKey][field.name][nestedField.name] = nestedField.default
+          }
+        })
+        return
+      }
+
+      if (field.type === 'array') {
+        if (!Array.isArray(filledData[sectionKey][field.name])) {
+          if (Array.isArray(field.default)) {
+            filledData[sectionKey][field.name] = JSON.parse(JSON.stringify(field.default))
+          } else if (field.item_fields?.length) {
+            const defaultItem: Record<string, unknown> = {}
+            field.item_fields.forEach((itemField: any) => {
+              defaultItem[itemField.name] = itemField.default
+            })
+            filledData[sectionKey][field.name] = [defaultItem]
+          } else {
+            filledData[sectionKey][field.name] = []
+          }
+        }
+        return
+      }
+
+      if (field.type === 'raw_json') {
+        if (filledData[sectionKey][field.name] === undefined) {
+          filledData[sectionKey][field.name] = field.default ?? null
+        }
+        return
+      }
+
+      if (filledData[sectionKey][field.name] === undefined && field.default !== undefined) {
+        filledData[sectionKey][field.name] = field.default
+      }
+    }
+
     // 处理sections数组
     if (Array.isArray(schema.sections)) {
       schema.sections.forEach((section: any) => {
@@ -488,24 +532,7 @@ const InstanceManagerPage: React.FC = () => {
 
         if (section.fields && Array.isArray(section.fields)) {
           section.fields.forEach((field: any) => {
-            if (field.type === 'nested' && field.nested_fields) {
-              // 处理嵌套字段
-              if (!filledData[sectionKey][field.name]) {
-                filledData[sectionKey][field.name] = {}
-              }
-
-              // 填充嵌套字段的默认值
-              field.nested_fields.forEach((nestedField: any) => {
-                if (filledData[sectionKey][field.name][nestedField.name] === undefined && nestedField.default !== undefined) {
-                  filledData[sectionKey][field.name][nestedField.name] = nestedField.default
-                }
-              })
-            } else {
-              // 处理普通字段
-              if (filledData[sectionKey][field.name] === undefined && field.default !== undefined) {
-                filledData[sectionKey][field.name] = field.default
-              }
-            }
+            applyFieldDefaults(sectionKey, field)
           })
         }
       })
@@ -518,24 +545,7 @@ const InstanceManagerPage: React.FC = () => {
 
         if (section.fields && Array.isArray(section.fields)) {
           section.fields.forEach((field: any) => {
-            if (field.type === 'nested' && field.nested_fields) {
-              // 处理嵌套字段
-              if (!filledData[sectionKey][field.name]) {
-                filledData[sectionKey][field.name] = {}
-              }
-
-              // 填充嵌套字段的默认值
-              field.nested_fields.forEach((nestedField: any) => {
-                if (filledData[sectionKey][field.name][nestedField.name] === undefined && nestedField.default !== undefined) {
-                  filledData[sectionKey][field.name][nestedField.name] = nestedField.default
-                }
-              })
-            } else {
-              // 处理普通字段
-              if (filledData[sectionKey][field.name] === undefined && field.default !== undefined) {
-                filledData[sectionKey][field.name] = field.default
-              }
-            }
+            applyFieldDefaults(sectionKey, field)
           })
         }
       })
@@ -2083,6 +2093,21 @@ const InstanceManagerPage: React.FC = () => {
                                   />
                                 )}
 
+                                {field.type === 'raw_json' && (
+                                  <GameConfigRawJsonField
+                                    value={fieldValue}
+                                    onChange={(nextValue) => handleConfigDataChange(nextValue, sectionKey, field.name)}
+                                  />
+                                )}
+
+                                {field.type === 'array' && field.item_fields && (
+                                  <GameConfigArrayField
+                                    field={field}
+                                    value={fieldValue}
+                                    onChange={(nextValue) => handleConfigDataChange(nextValue, sectionKey, field.name)}
+                                  />
+                                )}
+
                                 {/* 默认处理未知类型为文本输入 */}
                                 {field.type === 'nested' && field.nested_fields && (
                                   <div className="space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-600">
@@ -2225,7 +2250,7 @@ const InstanceManagerPage: React.FC = () => {
                                   </div>
                                 )}
 
-                                {!['string', 'integer', 'number', 'boolean', 'enum', 'select', 'float', 'double', 'nested'].includes(field.type) && (
+                                {!['string', 'integer', 'number', 'boolean', 'enum', 'select', 'float', 'double', 'nested', 'array', 'raw_json'].includes(field.type) && (
                                   <div className="space-y-2">
                                     <input
                                       type="text"

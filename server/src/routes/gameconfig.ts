@@ -324,6 +324,45 @@ router.post('/validate/:gameName', authenticateToken, async (req: Request, res: 
               errors.push(`${section.key}.${field.name}: 无效的选项值`)
             }
             break
+          case 'array':
+            if (!Array.isArray(value)) {
+              errors.push(`${section.key}.${field.name}: 必须是数组`)
+            } else if (field.item_fields) {
+              value.forEach((item, index) => {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                  errors.push(`${section.key}.${field.name}[${index}]: 必须是对象`)
+                  return
+                }
+
+                for (const itemField of field.item_fields!) {
+                  const itemValue = (item as Record<string, unknown>)[itemField.name]
+                  if (itemValue === undefined || itemValue === null) {
+                    if (itemField.default === undefined) {
+                      errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 缺少必填字段`)
+                    }
+                    continue
+                  }
+
+                  if (itemField.type === 'boolean' && typeof itemValue !== 'boolean') {
+                    errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 必须是布尔值`)
+                  }
+
+                  if (itemField.type === 'number' && isNaN(Number(itemValue))) {
+                    errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 必须是数字`)
+                  }
+
+                  if (itemField.type === 'select' && itemField.options && !itemField.options.some(opt => opt.value === itemValue)) {
+                    errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 无效的选项值`)
+                  }
+                }
+              })
+            }
+            break
+          case 'raw_json':
+            if (value !== null && typeof value !== 'object' && !Array.isArray(value)) {
+              errors.push(`${section.key}.${field.name}: 必须是有效的 JSON 值`)
+            }
+            break
         }
       }
     }
@@ -353,6 +392,21 @@ router.post('/validate/:gameName', authenticateToken, async (req: Request, res: 
 router.get('/instances/:instanceId/:gameName/raw', authenticateToken, async (req: Request, res: Response) => {
   try {
     const { instanceId, gameName } = req.params
+
+    if (!instanceManager) {
+      return res.status(500).json({
+        success: false,
+        message: 'InstanceManager 未初始化'
+      })
+    }
+
+    const instance = instanceManager.getInstance(instanceId)
+    if (!instance) {
+      return res.status(404).json({
+        success: false,
+        message: '未找到指定的实例'
+      })
+    }
     
     // 获取配置模板
     const template = await gameConfigManager.getGameConfigSchema(gameName)
@@ -363,8 +417,7 @@ router.get('/instances/:instanceId/:gameName/raw', authenticateToken, async (req
       })
     }
 
-    // 构建配置文件路径
-    const instancePath = path.join(process.cwd(), 'data', 'games', instanceId)
+    const instancePath = instance.workingDirectory
     const configFilePath = path.join(instancePath, template.meta.config_file)
     
     try {
@@ -379,7 +432,7 @@ router.get('/instances/:instanceId/:gameName/raw', authenticateToken, async (req
           parser: template.meta.parser || 'configobj'
         }
       })
-    } catch (error) {
+    } catch {
       res.status(404).json({
         success: false,
         message: '配置文件不存在'
