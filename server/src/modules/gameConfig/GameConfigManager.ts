@@ -10,10 +10,20 @@ export interface GameConfigField {
   name: string
   display: string
   default: any
-  type: 'string' | 'number' | 'boolean' | 'select' | 'nested'
+  type: 'string' | 'number' | 'boolean' | 'select' | 'nested' | 'raw_json' | 'array'
   description?: string
+  required?: boolean
+  min?: number
+  max?: number
   options?: Array<{ value: any; label: string }>
   nested_fields?: GameConfigField[]
+  item_fields?: GameConfigField[]
+  /** array 项卡片标题字段，默认 name */
+  item_label_field?: string
+  /** array 为空提示 */
+  empty_text?: string
+  /** array 添加按钮文案 */
+  add_button_label?: string
 }
 
 export interface GameConfigSection {
@@ -245,6 +255,10 @@ export class GameConfigManager {
             nestedValues[nestedField.name] = nestedField.default
           }
           result[section.key][field.name] = nestedValues
+        } else if (field.type === 'array') {
+          result[section.key][field.name] = this.getDefaultArrayValue(field)
+        } else if (field.type === 'raw_json') {
+          result[section.key][field.name] = field.default ?? null
         } else {
           result[section.key][field.name] = field.default
         }
@@ -349,6 +363,37 @@ export class GameConfigManager {
   }
 
   /**
+   * 根据模板字段定义解析单个配置值（供 JSON/YAML/TOML 等结构化解析器复用）
+   */
+  private resolveStructuredFieldValue(field: GameConfigField, sectionData: RawConfigObject): any {
+    if (field.type === 'nested' && field.nested_fields) {
+      const nestedValue = sectionData[field.name]
+      if (nestedValue !== undefined && typeof nestedValue === 'object' && !Array.isArray(nestedValue)) {
+        return nestedValue
+      }
+
+      const nestedDefaults: { [key: string]: any } = {}
+      for (const nestedField of field.nested_fields) {
+        nestedDefaults[nestedField.name] = nestedField.default
+      }
+      return nestedDefaults
+    }
+
+    if (field.type === 'array') {
+      const value = sectionData[field.name]
+      return Array.isArray(value) ? value : this.getDefaultArrayValue(field)
+    }
+
+    if (field.type === 'raw_json') {
+      const value = sectionData[field.name]
+      return value !== undefined ? value : (field.default ?? null)
+    }
+
+    const value = sectionData[field.name]
+    return value !== undefined ? value : field.default
+  }
+
+  /**
    * 使用YAML格式解析配置文件
    */
   private async parseWithYaml(configPath: string, configSchema: GameConfigSchema): Promise<ParsedConfigData> {
@@ -359,15 +404,12 @@ export class GameConfigManager {
 
       for (const section of configSchema.sections) {
         result[section.key] = {}
-        const sectionData = yamlData[section.key] || {}
+        const sectionData = section.key === ''
+          ? yamlData
+          : (yamlData[section.key] || {})
         
         for (const field of section.fields) {
-          const value = sectionData[field.name]
-          if (value !== undefined) {
-            result[section.key][field.name] = value
-          } else {
-            result[section.key][field.name] = field.default
-          }
+          result[section.key][field.name] = this.resolveStructuredFieldValue(field, sectionData as RawConfigObject)
         }
       }
 
@@ -393,29 +435,7 @@ export class GameConfigManager {
         const sectionData = section.key === '' ? jsonData : (jsonData[section.key] || {})
         
         for (const field of section.fields) {
-          if (field.type === 'nested' && field.nested_fields) {
-            // 处理嵌套字段
-            const nestedValue = sectionData[field.name]
-            if (nestedValue !== undefined && typeof nestedValue === 'object') {
-              // JSON格式的嵌套字段本身就是对象，直接使用
-              result[section.key][field.name] = nestedValue
-            } else {
-              // 使用默认值填充嵌套字段
-              const nestedDefaults: { [key: string]: any } = {}
-              for (const nestedField of field.nested_fields) {
-                nestedDefaults[nestedField.name] = nestedField.default
-              }
-              result[section.key][field.name] = nestedDefaults
-            }
-          } else {
-            // 处理普通字段
-            const value = sectionData[field.name]
-            if (value !== undefined) {
-              result[section.key][field.name] = value
-            } else {
-              result[section.key][field.name] = field.default
-            }
-          }
+          result[section.key][field.name] = this.resolveStructuredFieldValue(field, sectionData as RawConfigObject)
         }
       }
 
@@ -670,6 +690,8 @@ export class GameConfigManager {
             ...this.cloneRawObject(existingNested),
             ...value
           }
+        } else if (field.type === 'array' || field.type === 'raw_json') {
+          targetContainer[field.name] = this.cloneRawObject(value)
         } else {
           targetContainer[field.name] = value
         }
@@ -677,6 +699,34 @@ export class GameConfigManager {
     }
 
     return mergedConfig
+  }
+
+  private getDefaultArrayValue(field: GameConfigField): RawConfigValue[] {
+    if (Array.isArray(field.default)) {
+      return this.cloneRawObject(field.default)
+    }
+
+    if (!field.item_fields || field.item_fields.length === 0) {
+      return []
+    }
+
+    return [this.buildDefaultArrayItem(field.item_fields)]
+  }
+
+  private buildDefaultArrayItem(itemFields: GameConfigField[]): RawConfigObject {
+    const item: RawConfigObject = {}
+
+    for (const itemField of itemFields) {
+      if (itemField.type === 'nested' && itemField.nested_fields) {
+        item[itemField.name] = this.buildDefaultArrayItem(itemField.nested_fields)
+      } else if (itemField.type === 'array') {
+        item[itemField.name] = this.getDefaultArrayValue(itemField)
+      } else {
+        item[itemField.name] = itemField.default
+      }
+    }
+
+    return item
   }
 
   private isPlainObject(value: unknown): value is RawConfigObject {
@@ -853,15 +903,12 @@ export class GameConfigManager {
 
       for (const section of configSchema.sections) {
         result[section.key] = {}
-        const sectionData = tomlData[section.key] || {}
+        const sectionData = section.key === ''
+          ? tomlData
+          : (tomlData[section.key] || {})
         
         for (const field of section.fields) {
-          const value = sectionData[field.name]
-          if (value !== undefined) {
-            result[section.key][field.name] = value
-          } else {
-            result[section.key][field.name] = field.default
-          }
+          result[section.key][field.name] = this.resolveStructuredFieldValue(field, sectionData as RawConfigObject)
         }
       }
 
