@@ -350,6 +350,11 @@ sections:
         display: "用户分组"
         type: "array"
         description: "玩家权限分组，支持动态增删。每个分组需设置独立密码与权限。"
+        item_label_field: "name"
+        empty_text: "暂无用户分组，点击下方按钮添加。"
+        add_button_label: "添加用户分组"
+        min: 0
+        max: 16
         item_fields:
           - name: "name"
             display: "分组名称"

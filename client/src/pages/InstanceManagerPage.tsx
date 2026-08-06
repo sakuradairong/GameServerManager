@@ -29,6 +29,7 @@ import apiClient from '@/utils/api'
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
 import { ConfirmStartDialog } from '@/components/ConfirmStartDialog'
 import { GameConfigArrayField, GameConfigRawJsonField } from '@/components/GameConfigFieldExtras'
+import { buildDefaultArrayItem } from '@/types/gameConfig'
 import { StartErrorDialog } from '@/components/StartErrorDialog'
 import { CreateConfigDialog } from '@/components/CreateConfigDialog'
 import SearchableSelect from '@/components/SearchableSelect'
@@ -497,11 +498,7 @@ const InstanceManagerPage: React.FC = () => {
           if (Array.isArray(field.default)) {
             filledData[sectionKey][field.name] = JSON.parse(JSON.stringify(field.default))
           } else if (field.item_fields?.length) {
-            const defaultItem: Record<string, unknown> = {}
-            field.item_fields.forEach((itemField: any) => {
-              defaultItem[itemField.name] = itemField.default
-            })
-            filledData[sectionKey][field.name] = [defaultItem]
+            filledData[sectionKey][field.name] = [buildDefaultArrayItem(field.item_fields)]
           } else {
             filledData[sectionKey][field.name] = []
           }

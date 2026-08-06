@@ -327,35 +327,43 @@ router.post('/validate/:gameName', authenticateToken, async (req: Request, res: 
           case 'array':
             if (!Array.isArray(value)) {
               errors.push(`${section.key}.${field.name}: 必须是数组`)
-            } else if (field.item_fields) {
-              value.forEach((item, index) => {
-                if (!item || typeof item !== 'object' || Array.isArray(item)) {
-                  errors.push(`${section.key}.${field.name}[${index}]: 必须是对象`)
-                  return
-                }
+            } else {
+              if (typeof field.min === 'number' && value.length < field.min) {
+                errors.push(`${section.key}.${field.name}: 至少需要 ${field.min} 项`)
+              }
+              if (typeof field.max === 'number' && value.length > field.max) {
+                errors.push(`${section.key}.${field.name}: 最多允许 ${field.max} 项`)
+              }
+              if (field.item_fields) {
+                value.forEach((item, index) => {
+                  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                    errors.push(`${section.key}.${field.name}[${index}]: 必须是对象`)
+                    return
+                  }
 
-                for (const itemField of field.item_fields!) {
-                  const itemValue = (item as Record<string, unknown>)[itemField.name]
-                  if (itemValue === undefined || itemValue === null) {
-                    if (itemField.default === undefined) {
-                      errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 缺少必填字段`)
+                  for (const itemField of field.item_fields!) {
+                    const itemValue = (item as Record<string, unknown>)[itemField.name]
+                    if (itemValue === undefined || itemValue === null) {
+                      if (itemField.default === undefined) {
+                        errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 缺少必填字段`)
+                      }
+                      continue
                     }
-                    continue
-                  }
 
-                  if (itemField.type === 'boolean' && typeof itemValue !== 'boolean') {
-                    errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 必须是布尔值`)
-                  }
+                    if (itemField.type === 'boolean' && typeof itemValue !== 'boolean') {
+                      errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 必须是布尔值`)
+                    }
 
-                  if (itemField.type === 'number' && isNaN(Number(itemValue))) {
-                    errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 必须是数字`)
-                  }
+                    if (itemField.type === 'number' && isNaN(Number(itemValue))) {
+                      errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 必须是数字`)
+                    }
 
-                  if (itemField.type === 'select' && itemField.options && !itemField.options.some(opt => opt.value === itemValue)) {
-                    errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 无效的选项值`)
+                    if (itemField.type === 'select' && itemField.options && !itemField.options.some(opt => opt.value === itemValue)) {
+                      errors.push(`${section.key}.${field.name}[${index}].${itemField.name}: 无效的选项值`)
+                    }
                   }
-                }
-              })
+                })
+              }
             }
             break
           case 'raw_json':
