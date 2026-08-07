@@ -23,3 +23,13 @@ const possiblePaths = [
 18. 本项目编写测试代码后应当测试成功后删除
 19. 升级依赖时要注意兼容问题，不要做大版本升级，尽量修复依赖漏洞。
 20. 本项目没有测试代码，所以不需要运行和编写测试，直接交付即可。
+
+## Cursor Cloud specific instructions
+
+Full-stack app: a Node.js/TypeScript Express + Socket.IO backend (`server/`) and a React 18 + Vite frontend (`client/`). Standard commands live in the root/`server`/`client` `package.json` files; prefer those.
+
+- Run dev (both services together): `npm run dev` from repo root — it uses `concurrently` to start the backend (`tsx watch`, port `3001`) and the Vite dev server (port `5173`). Open the app at `http://localhost:5173`; Vite proxies `/api` and `/socket.io` to the backend on `3001`, so use `5173` (not `3001`) in the browser.
+- First-run account: despite the README mentioning `admin/admin123`, the backend no longer auto-creates a default admin. On a fresh `server/data` the UI shows a "创建管理员账户" (register first admin) screen. Register an admin yourself (username: alphanumeric, ≥3 chars; password ≥6 chars) via `/api/auth/register` or the UI, then log in. After any failed login attempt, subsequent logins require the on-screen CAPTCHA (`验证码`).
+- Static check: this project has no automated tests (rule 20) and the root `npm run lint` script is currently broken (it runs ESLint but no ESLint config exists in `client/`). Use `npx tsc --noEmit` in both `server/` and `client/` as the type/correctness check (rule 16).
+- On first backend start, the server downloads PTY / Zip-Tools / 7z binaries from GitHub into `server/data/lib/` (needs outbound network). Failures are non-fatal and only disable terminal/zip features.
+- Runtime data (`server/data/*`, PTY binaries, logs) is git-ignored; deleting `server/data/users.json` resets to the first-run register screen.
