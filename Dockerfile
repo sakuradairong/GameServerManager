@@ -211,6 +211,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 # ---------- 构建阶段 ----------
 FROM base AS builder
 
+ARG TARGETARCH
 ARG APP_VERSION=development
 ENV APP_VERSION=${APP_VERSION} \
     VITE_APP_VERSION=${APP_VERSION}
@@ -238,6 +239,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 # ---------- 运行阶段（最终镜像） ----------
 FROM base AS runtime
 
+ARG TARGETARCH
 ARG APP_VERSION=development
 ENV APP_VERSION=${APP_VERSION}
 LABEL org.opencontainers.image.version=${APP_VERSION}
