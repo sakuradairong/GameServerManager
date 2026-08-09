@@ -4,7 +4,18 @@
   "terminals": [
     {
       "name": "gsm3-dev",
-      "command": "npm run dev"
+      "command": "npm run dev",
+      "description": "启动 GSM3 开发环境：后端 API (端口 3001) 与前端 Vite 开发服务器 (端口 5173) 并行运行，前端通过代理访问后端 /api 与 /socket.io。"
+    }
+  ],
+  "ports": [
+    {
+      "name": "backend-api",
+      "port": 3001
+    },
+    {
+      "name": "frontend-vite",
+      "port": 5173
     }
   ]
 }
