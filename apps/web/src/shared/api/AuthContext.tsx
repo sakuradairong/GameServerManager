@@ -13,6 +13,7 @@ import {
   type PublicUser,
 } from '@gsm4/shared'
 import { apiClient, getToken, setToken } from './client'
+import { disconnectSocket, refreshSocketAuth } from '../realtime/socket'
 
 interface AuthStatus {
   initialized: boolean
@@ -97,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(result.token)
       persistUser(result.user)
       setStatus({ initialized: true, registrationOpen: false })
+      refreshSocketAuth()
     },
     [persistUser],
   )
@@ -110,11 +112,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(result.token)
       persistUser(result.user)
       setStatus({ initialized: true, registrationOpen: false })
+      refreshSocketAuth()
     },
     [persistUser],
   )
 
   const logout = useCallback(() => {
+    disconnectSocket()
     setToken(null)
     persistUser(null)
   }, [persistUser])

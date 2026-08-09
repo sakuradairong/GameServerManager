@@ -1,9 +1,19 @@
+import type { ReactElement } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { NAV_ITEMS } from '@gsm4/shared'
 import { useAuth } from '../shared/api/AuthContext'
 import { AppLayout } from './AppLayout'
 import { LoginPage } from '../features/auth/LoginPage'
 import { PlaceholderPage } from '../features/common/PlaceholderPage'
+import { HomePage } from '../features/home/HomePage'
+import { InstancesPage } from '../features/instances/InstancesPage'
+import { TerminalPage } from '../features/terminal/TerminalPage'
+
+const featurePages: Record<string, ReactElement> = {
+  home: <HomePage />,
+  terminal: <TerminalPage />,
+  instances: <InstancesPage />,
+}
 
 export function App() {
   const { user, loading } = useAuth()
@@ -33,10 +43,12 @@ export function App() {
             key={item.id}
             path={item.path === '/' ? '/' : item.path}
             element={
-              <PlaceholderPage
-                title={item.label}
-                description={`「${item.label}」模块将在后续里程碑接入。当前为 GSM4 M0 导航壳。`}
-              />
+              featurePages[item.id] || (
+                <PlaceholderPage
+                  title={item.label}
+                  description={`「${item.label}」模块将在后续里程碑接入。`}
+                />
+              )
             }
           />
         ))}

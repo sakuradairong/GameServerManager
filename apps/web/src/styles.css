@@ -231,6 +231,152 @@ input {
   }
 }
 
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stat-card .stat-label {
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.stat-card .stat-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.field select {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.6fr 1.2fr;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.table-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: start;
+}
+
+.status-pill {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+}
+
+.status-running,
+.status-starting {
+  color: #7dffb2;
+  border-color: rgba(59, 178, 115, 0.45);
+}
+
+.status-stopped {
+  color: var(--text-muted);
+}
+
+.status-error,
+.status-stopping {
+  color: #ff8d98;
+  border-color: rgba(227, 93, 106, 0.45);
+}
+
+.btn-danger {
+  background: var(--danger);
+}
+
+.error-text {
+  color: #ff8d98;
+}
+
+.terminal-layout {
+  min-height: calc(100vh - 120px);
+}
+
+.terminal-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  min-height: 520px;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-item {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.session-item.active,
+.session-item:hover {
+  border-color: var(--accent);
+  background: var(--bg-soft);
+}
+
+.terminal-panel {
+  padding: 10px;
+  min-height: 520px;
+}
+
+.xterm-host {
+  height: 100%;
+  min-height: 480px;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -244,5 +390,12 @@ input {
   .nav-list {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  .stat-grid,
+  .form-grid,
+  .terminal-body,
+  .table-row {
+    grid-template-columns: 1fr;
   }
 }
