@@ -2,6 +2,8 @@ export * from './instance.js'
 export * from './system.js'
 export * from './realtime.js'
 export * from './deploy.js'
+export * from './settings.js'
+export * from './files.js'
 
 import { z } from 'zod'
 

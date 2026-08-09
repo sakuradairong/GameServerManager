@@ -9,7 +9,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       data: {
         status: 'ok' as const,
         product: 'gsm4' as const,
-        version: '4.0.0-m0',
+        version: '4.0.0-rc.1',
         schemaVersion: manifest.schemaVersion,
       },
     }

@@ -2,49 +2,62 @@
 
 GSM4 是 GameServerManager 的下一代实现线（orphan 分支 `gsm4/main`）。
 
-- **GSM3**：仓库历史分支 `main`（遗产维护）
-- **GSM4**：本分支，按 [`docs/gsm4/`](docs/gsm4/README.md) 方案里程碑推进
+当前版本已可作为一个**日常可用的管理面板**启动：登录、监控、终端、实例、部署、文件、设置。
 
-## 当前里程碑：M2
-
-在 M1 之上增加统一部署内核：
-
-- `DeploySession`：校验 → 会话 → Executor → `deploy:*` 进度 → 实例提交/回滚
-- 执行器：`steamcmd` / `minecraft` / `archive`
-- Catalog：`installgame.json` 读写与远程同步
-- Web：`features/deploy` 三子页（非单文件巨页）
-- 验收说明：[`docs/gsm4/M2-验收说明.md`](docs/gsm4/M2-验收说明.md)
-
-## 开发
+## 快速启动（生产一体）
 
 要求 Node.js ≥ 20。
+
+```bash
+npm install
+npm run build
+./start.sh
+# 或: npm start
+```
+
+浏览器打开：`http://127.0.0.1:3001`
+
+首次访问会要求注册管理员账号。
+
+## 开发模式
 
 ```bash
 npm install
 npm run dev
 ```
 
-- Web: http://localhost:5173（代理 `/api` → 3001）
+- Web: http://localhost:5173（代理 `/api` 与 `/socket.io`）
 - API: http://localhost:3001
 
-其它命令：
+## 已可用能力
+
+| 模块 | 说明 |
+|------|------|
+| 首页 | CPU / 内存 / 磁盘 / Load 实时监控 |
+| 终端 | 多会话 PTY |
+| 实例 | CRUD、启停重启、操作锁 |
+| 游戏部署 | DeploySession：SteamCMD / Minecraft / 归档 |
+| 文件 | 默认安装目录浏览、编辑、上传、删除 |
+| 设置 | 默认安装路径、SteamCMD 路径 |
+| 关于 | 版本与启动说明 |
+
+后续里程碑（定时任务、环境、插件等）仍为占位页。
+
+## 数据目录
+
+- `data/`：`config.json`、`users.json`、`instances.json`、`games/installgame.json`
+- 默认游戏目录：`games/`（可在设置中修改）
+- 环境变量：
+  - `PORT`
+  - `GSM4_DATA_DIR`
+  - `GSM4_DEFAULT_INSTALL_PATH`
+
+## Docker
 
 ```bash
-npm run typecheck
-npm run build
-npm run start   # 仅启动已构建的 server
+docker build -t gsm4 .
+docker run --rm -p 3001:3001 -v gsm4_data:/app/data -v gsm4_games:/app/games gsm4
 ```
-
-数据目录：`./data`（`config.json` / `users.json` / `manifest.json`）。
-
-## Docker（草稿）
-
-```bash
-docker build -t gsm4:m0 .
-docker run --rm -p 3001:3001 -v gsm4_data:/app/data gsm4:m0
-```
-
-> M0 镜像默认只起 API；完整静态资源托管将在后续里程碑完善。
 
 ## 文档
 

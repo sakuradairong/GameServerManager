@@ -11,6 +11,8 @@ import { instanceRoutes } from './routes/instances.js'
 import { terminalRoutes } from './routes/terminal.js'
 import { deployRoutes } from './routes/deploy.js'
 import { catalogRoutes } from './routes/catalog.js'
+import { fileRoutes } from './routes/files.js'
+import { staticWebPlugin } from './plugins/staticWeb.js'
 import { setupRealtime } from './socket/realtime.js'
 
 async function main() {
@@ -47,6 +49,7 @@ async function main() {
   await app.register(terminalRoutes)
   await app.register(deployRoutes)
   await app.register(catalogRoutes)
+  await app.register(fileRoutes)
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error)
@@ -58,6 +61,9 @@ async function main() {
     })
   })
 
+  // 静态站最后注册，避免挡住 /api
+  await app.register(staticWebPlugin)
+
   await app.listen({
     host: config.server.host,
     port: config.server.port,
@@ -65,7 +71,7 @@ async function main() {
 
   setupRealtime(app.server as HttpServer)
 
-  app.log.info(`GSM4 server listening on ${config.server.host}:${config.server.port}`)
+  app.log.info(`GSM4 listening on http://${config.server.host}:${config.server.port}`)
 }
 
 main().catch((error) => {

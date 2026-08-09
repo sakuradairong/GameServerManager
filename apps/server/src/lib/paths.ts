@@ -50,3 +50,23 @@ export async function resolveDataFile(relativePath: string): Promise<string> {
   const dataDir = await resolveDataDir()
   return path.join(dataDir, relativePath)
 }
+
+/** 解析 monorepo 根目录（含 name=gsm4 的 package.json） */
+export async function resolveRepoRoot(): Promise<string> {
+  let current = process.cwd()
+  for (let i = 0; i < 5; i += 1) {
+    try {
+      const pkgRaw = await fs.readFile(path.join(current, 'package.json'), 'utf8')
+      const pkg = JSON.parse(pkgRaw) as { name?: string; workspaces?: unknown }
+      if (pkg.name === 'gsm4' || pkg.workspaces) {
+        return current
+      }
+    } catch {
+      // continue
+    }
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return process.cwd()
+}

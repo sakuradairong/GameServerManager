@@ -9,12 +9,18 @@ import { HomePage } from '../features/home/HomePage'
 import { InstancesPage } from '../features/instances/InstancesPage'
 import { TerminalPage } from '../features/terminal/TerminalPage'
 import { DeployPage } from '../features/deploy/DeployPage'
+import { FilesPage } from '../features/files/FilesPage'
+import { SettingsPage } from '../features/settings/SettingsPage'
+import { AboutPage } from '../features/about/AboutPage'
 
 const featurePages: Record<string, ReactElement> = {
   home: <HomePage />,
   terminal: <TerminalPage />,
   instances: <InstancesPage />,
   deploy: <DeployPage />,
+  files: <FilesPage />,
+  settings: <SettingsPage />,
+  about: <AboutPage />,
 }
 
 export function App() {
@@ -48,7 +54,7 @@ export function App() {
               featurePages[item.id] || (
                 <PlaceholderPage
                   title={item.label}
-                  description={`「${item.label}」模块将在后续里程碑接入。`}
+                  description={`「${item.label}」将在后续里程碑接入；当前面板已可完成日常部署与运维。`}
                 />
               )
             }

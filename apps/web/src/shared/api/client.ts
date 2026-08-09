@@ -89,6 +89,46 @@ class ApiClient {
       body: JSON.stringify(body ?? {}),
     })
   }
+
+  put<T>(path: string, body: unknown = {}) {
+    return this.request<T>(path, {
+      method: 'PUT',
+      body: JSON.stringify(body ?? {}),
+    })
+  }
+
+  async upload<T>(path: string, file: File, fields?: Record<string, string>) {
+    const form = new FormData()
+    form.append('file', file)
+    if (fields) {
+      for (const [key, value] of Object.entries(fields)) {
+        form.append(key, value)
+      }
+    }
+    const token = getToken()
+    const headers = new Headers()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+
+    const response = await fetch(path, {
+      method: 'POST',
+      headers,
+      body: form,
+    })
+    const json = (await response.json().catch(() => null)) as
+      | { success: true; data: T; message?: string }
+      | ApiErrorBody
+      | null
+    if (!response.ok || !json || json.success === false) {
+      throw new ApiError(
+        json && 'message' in json && json.message
+          ? json.message
+          : `上传失败 (${response.status})`,
+        response.status,
+        json && json.success === false ? json : null,
+      )
+    }
+    return json.data
+  }
 }
 
 export const apiClient = new ApiClient()

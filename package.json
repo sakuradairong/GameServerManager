@@ -1,6 +1,6 @@
 {
   "name": "gsm4",
-  "version": "4.0.0-m0",
+  "version": "4.0.0-rc.1",
   "private": true,
   "description": "GSM4 游戏服务端管理面板",
   "workspaces": [
@@ -13,7 +13,8 @@
     "dev:web": "npm run dev -w @gsm4/web",
     "build": "npm run build -w @gsm4/shared && npm run build -w @gsm4/server && npm run build -w @gsm4/web",
     "typecheck": "npm run build -w @gsm4/shared && npm run typecheck -w @gsm4/server && npm run typecheck -w @gsm4/web",
-    "start": "npm run start -w @gsm4/server"
+    "start": "npm run start -w @gsm4/server",
+    "start:prod": "npm run build && npm run start"
   },
   "engines": {
     "node": ">=20"

@@ -26,7 +26,7 @@ export function AppLayout() {
       </aside>
       <section className="main">
         <div className="topbar">
-          <div className="muted">GameServerManager 4 · M2</div>
+          <div className="muted">GameServerManager 4</div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <span className="muted">{user?.username}</span>
             <button type="button" className="btn btn-ghost" onClick={logout}>
