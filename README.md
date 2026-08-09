@@ -36,9 +36,9 @@ npm run dev
 | 首页 | CPU / 内存 / 磁盘 / Load 实时监控 |
 | 终端 | 多会话 PTY |
 | 实例 | CRUD、启停重启、操作锁 |
-| 游戏部署 | DeploySession：SteamCMD / Minecraft / 归档 |
+| 游戏部署 | DeploySession：SteamCMD / Minecraft / 归档 / 基岩版 / tModLoader（能力表驱动） |
 | 文件 | 默认安装目录浏览、编辑、上传、删除 |
-| 设置 | 默认安装路径、SteamCMD 路径 |
+| 设置 | 默认安装路径、SteamCMD 一键安装/路径 |
 | 关于 | 版本与启动说明 |
 
 后续里程碑（定时任务、环境、插件等）仍为占位页。
