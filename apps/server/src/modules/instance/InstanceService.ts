@@ -7,6 +7,8 @@ import {
   UpdateInstanceBodySchema,
   type CreateInstanceBody,
   type Instance,
+  type InstanceSteamMeta,
+  type InstanceType,
   type UpdateInstanceBody,
 } from '@gsm4/shared'
 import { configManager } from '../config/ConfigManager.js'
@@ -65,12 +67,60 @@ export class InstanceService {
       stopCommand: parsed.stopCommand || 'ctrl+c',
       autoStart: parsed.autoStart || false,
       status: 'stopped',
+      instanceType: 'generic',
       createdAt: new Date().toISOString(),
     }
 
     this.instances.set(instance.id, instance)
     await this.persist()
     return instance
+  }
+
+  async createFromDeploy(input: {
+    name: string
+    workingDirectory: string
+    startCommand: string
+    description?: string
+    instanceType?: InstanceType
+    steam?: InstanceSteamMeta
+  }): Promise<Instance> {
+    await fs.mkdir(input.workingDirectory, { recursive: true })
+    const instance: Instance = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      description: input.description || '',
+      workingDirectory: input.workingDirectory,
+      startCommand: input.startCommand,
+      stopCommand: 'ctrl+c',
+      autoStart: false,
+      status: 'stopped',
+      instanceType: input.instanceType || 'generic',
+      steam: input.steam,
+      createdAt: new Date().toISOString(),
+    }
+    this.instances.set(instance.id, instance)
+    this.locks.add(instance.id)
+    await this.persist()
+    return instance
+  }
+
+  async finalizeDeploy(id: string, patch?: Partial<Instance>): Promise<Instance> {
+    const current = this.require(id)
+    const next = { ...current, ...patch, status: 'stopped' as const }
+    this.instances.set(id, next)
+    this.locks.delete(id)
+    await this.persist()
+    return next
+  }
+
+  async rollbackDeploy(id: string): Promise<void> {
+    this.locks.delete(id)
+    this.instances.delete(id)
+    await this.persist()
+  }
+
+  isLocked(id: string) {
+    return this.locks.has(id)
   }
 
   async update(id: string, body: UpdateInstanceBody): Promise<Instance> {

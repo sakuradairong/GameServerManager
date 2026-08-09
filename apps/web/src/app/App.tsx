@@ -8,11 +8,13 @@ import { PlaceholderPage } from '../features/common/PlaceholderPage'
 import { HomePage } from '../features/home/HomePage'
 import { InstancesPage } from '../features/instances/InstancesPage'
 import { TerminalPage } from '../features/terminal/TerminalPage'
+import { DeployPage } from '../features/deploy/DeployPage'
 
 const featurePages: Record<string, ReactElement> = {
   home: <HomePage />,
   terminal: <TerminalPage />,
   instances: <InstancesPage />,
+  deploy: <DeployPage />,
 }
 
 export function App() {

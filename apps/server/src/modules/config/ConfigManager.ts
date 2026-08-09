@@ -16,6 +16,9 @@ export interface Gsm4Config {
   game: {
     defaultInstallPath: string
   }
+  steamcmd: {
+    path: string
+  }
   security: {
     resetTokenOnStartup: boolean
   }
@@ -31,7 +34,11 @@ const DEFAULT_CONFIG = (): Gsm4Config => ({
     port: Number(process.env.PORT) || 3001,
   },
   game: {
-    defaultInstallPath: path.join(process.cwd(), 'games'),
+    defaultInstallPath:
+      process.env.GSM4_DEFAULT_INSTALL_PATH || path.join(process.cwd(), 'games'),
+  },
+  steamcmd: {
+    path: '',
   },
   security: {
     resetTokenOnStartup: false,
@@ -97,6 +104,7 @@ export class ConfigManager {
         jwt: { ...DEFAULT_CONFIG().jwt, ...parsed.jwt },
         server: { ...DEFAULT_CONFIG().server, ...parsed.server },
         game: { ...DEFAULT_CONFIG().game, ...parsed.game },
+        steamcmd: { ...DEFAULT_CONFIG().steamcmd, ...parsed.steamcmd },
         security: { ...DEFAULT_CONFIG().security, ...parsed.security },
       }
       return merged

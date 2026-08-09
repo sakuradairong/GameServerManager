@@ -377,6 +377,56 @@ input {
   min-height: 480px;
 }
 
+.deploy-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.deploy-tab {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.deploy-tab.active,
+.deploy-tab:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--bg-soft);
+}
+
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #5ec8ff);
+  transition: width 0.25s ease;
+}
+
+.deploy-log {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 10px;
+  background: #0b1016;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;

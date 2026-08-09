@@ -1,6 +1,7 @@
 export * from './instance.js'
 export * from './system.js'
 export * from './realtime.js'
+export * from './deploy.js'
 
 import { z } from 'zod'
 

@@ -12,6 +12,16 @@ export type InstanceStatus = z.infer<typeof InstanceStatusSchema>
 export const StopCommandSchema = z.enum(['ctrl+c', 'stop', 'exit', 'quit'])
 export type StopCommand = z.infer<typeof StopCommandSchema>
 
+export const InstanceTypeSchema = z.enum(['generic', 'steam', 'minecraft', 'archive'])
+export type InstanceType = z.infer<typeof InstanceTypeSchema>
+
+export const InstanceSteamMetaSchema = z.object({
+  appId: z.string(),
+  gameKey: z.string().optional(),
+  branch: z.string().optional(),
+})
+export type InstanceSteamMeta = z.infer<typeof InstanceSteamMetaSchema>
+
 export const InstanceSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(128),
@@ -23,6 +33,8 @@ export const InstanceSchema = z.object({
   status: InstanceStatusSchema,
   pid: z.number().optional(),
   terminalSessionId: z.string().optional(),
+  instanceType: InstanceTypeSchema.optional().default('generic'),
+  steam: InstanceSteamMetaSchema.optional(),
   createdAt: z.string(),
   lastStarted: z.string().optional(),
   lastStopped: z.string().optional(),

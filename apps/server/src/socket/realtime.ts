@@ -5,6 +5,8 @@ import { authService } from '../modules/auth/AuthService.js'
 import { systemService } from '../modules/system/SystemService.js'
 import { terminalService } from '../modules/terminal/TerminalService.js'
 import { instanceService } from '../modules/instance/InstanceService.js'
+import { progressBus } from '../modules/deploy/ProgressBus.js'
+import { deployService } from '../modules/deploy/DeployService.js'
 
 declare module 'socket.io' {
   interface SocketData {
@@ -66,8 +68,38 @@ export function setupRealtime(httpServer: HttpServer) {
     void instanceService.handleTerminalExit(sessionId)
   })
 
+  progressBus.onProgress((progress) => {
+    io.emit(RealtimeEvents.deployProgress, progress)
+  })
+  progressBus.onLog((log) => {
+    io.emit(RealtimeEvents.deployLog, log)
+  })
+  progressBus.onComplete((summary) => {
+    io.emit(RealtimeEvents.deployComplete, summary)
+  })
+  progressBus.onError((payload) => {
+    io.emit(RealtimeEvents.deployError, payload)
+  })
+
   io.on('connection', (socket) => {
     socket.emit(RealtimeEvents.sessionList, terminalService.listSessions())
+
+    socket.on(RealtimeEvents.deployCancel, (payload: { sessionId?: string }) => {
+      try {
+        if (!payload?.sessionId) return
+        const session = deployService.cancel(payload.sessionId)
+        socket.emit(RealtimeEvents.deployProgress, {
+          sessionId: session.sessionId,
+          stage: 'cancelling',
+          message: '已请求取消',
+        })
+      } catch (error) {
+        socket.emit(RealtimeEvents.deployError, {
+          sessionId: payload?.sessionId,
+          error: error instanceof Error ? error.message : '取消失败',
+        })
+      }
+    })
 
     socket.on(RealtimeEvents.subscribeSystemStats, async () => {
       await socket.join('system-stats')

@@ -9,6 +9,8 @@ import { configRoutes } from './routes/config.js'
 import { systemRoutes } from './routes/system.js'
 import { instanceRoutes } from './routes/instances.js'
 import { terminalRoutes } from './routes/terminal.js'
+import { deployRoutes } from './routes/deploy.js'
+import { catalogRoutes } from './routes/catalog.js'
 import { setupRealtime } from './socket/realtime.js'
 
 async function main() {
@@ -43,6 +45,8 @@ async function main() {
   await app.register(systemRoutes)
   await app.register(instanceRoutes)
   await app.register(terminalRoutes)
+  await app.register(deployRoutes)
+  await app.register(catalogRoutes)
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error)

@@ -11,6 +11,10 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
         game: {
           defaultInstallPath: config.game.defaultInstallPath,
         },
+        steamcmd: {
+          configured: Boolean(config.steamcmd.path),
+          path: config.steamcmd.path || '',
+        },
         server: {
           port: config.server.port,
         },

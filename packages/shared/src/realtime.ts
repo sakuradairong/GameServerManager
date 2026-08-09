@@ -22,6 +22,13 @@ export const RealtimeEvents = {
   sessionList: 'session-list',
   sessionReconnected: 'session-reconnected',
   sessionReconnectFailed: 'session-reconnect-failed',
+
+  // deploy
+  deployProgress: 'deploy:progress',
+  deployLog: 'deploy:log',
+  deployComplete: 'deploy:complete',
+  deployError: 'deploy:error',
+  deployCancel: 'deploy:cancel',
 } as const
 
 export type RealtimeEvent = (typeof RealtimeEvents)[keyof typeof RealtimeEvents]
