@@ -15,3 +15,13 @@
 13. 改动后运行 `npm run typecheck`。
 14. 遵循 `docs/gsm4/` 里程碑；M2 前禁止平行复制多套部署管道。
 15. 不把 GSM3 `client/` `server/` 上帝文件剪贴进本树。
+
+## Cursor Cloud
+
+- 依赖安装：仓库根目录 `npm install`（workspaces）。
+- 类型检查：`npm run typecheck`。
+- 开发启动：`npm run dev`（web `:5173`，api `:3001`；Vite 代理 `/api` 与 `/socket.io`）。
+- 生产一体：`npm run build && npm start`（或 `./start.sh`），浏览器访问 `:3001`。
+- 首次使用需注册管理员；token 键为 `gsm4_token`。
+- SteamCMD 可在设置页一键安装；数据目录为 `data/`。
+- 云环境配置见 `.cursor/environment.json`。

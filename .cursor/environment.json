@@ -1,0 +1,10 @@
+{
+  "name": "gsm4",
+  "install": "npm install\nnpm run build -w @gsm4/shared",
+  "terminals": [
+    {
+      "name": "gsm4-dev",
+      "command": "npm run dev"
+    }
+  ]
+}
