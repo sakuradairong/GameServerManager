@@ -12,6 +12,7 @@ import { terminalRoutes } from './routes/terminal.js'
 import { deployRoutes } from './routes/deploy.js'
 import { catalogRoutes } from './routes/catalog.js'
 import { fileRoutes } from './routes/files.js'
+import { steamcmdRoutes } from './routes/steamcmd.js'
 import { staticWebPlugin } from './plugins/staticWeb.js'
 import { setupRealtime } from './socket/realtime.js'
 
@@ -50,6 +51,7 @@ async function main() {
   await app.register(deployRoutes)
   await app.register(catalogRoutes)
   await app.register(fileRoutes)
+  await app.register(steamcmdRoutes)
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error)

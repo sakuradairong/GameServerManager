@@ -4,6 +4,7 @@ import { apiClient, ApiError } from '../../../shared/api/client'
 import { useToast } from '../../../shared/ui/Toast'
 import { useDeploySession } from '../hooks/useDeploySession'
 import { DeployConsole } from '../components/DeployConsole'
+import { SteamcmdInstallCard } from '../../settings/SteamcmdInstallCard'
 
 export function SteamDeployPanel() {
   const { push } = useToast()
@@ -71,13 +72,19 @@ export function SteamDeployPanel() {
       <form className="page-card" onSubmit={onSubmit}>
         <h3 style={{ marginTop: 0 }}>SteamCMD 部署</h3>
         <p className="page-desc">
-          通过统一 DeploySession 调用 steamcmd 执行器。可在「设置」中配置 SteamCMD 路径。
+          通过统一 DeploySession 调用 steamcmd 执行器。未安装时可直接一键安装。
         </p>
         {loading && <p className="muted">正在加载 Steam 目录与配置…</p>}
         {!loading && steamConfigured === false && (
-          <p className="warn-text">
-            尚未配置 SteamCMD 可执行文件路径。请先到「设置」填写后再部署。
-          </p>
+          <div style={{ marginBottom: 16 }}>
+            <p className="warn-text">尚未配置 SteamCMD，请先一键安装或到「设置」手动填写路径。</p>
+            <SteamcmdInstallCard
+              compact
+              onInstalled={() => {
+                setSteamConfigured(true)
+              }}
+            />
+          </div>
         )}
         <div className="form-grid">
           <label className="field">

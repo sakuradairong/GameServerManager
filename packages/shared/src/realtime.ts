@@ -29,6 +29,11 @@ export const RealtimeEvents = {
   deployComplete: 'deploy:complete',
   deployError: 'deploy:error',
   deployCancel: 'deploy:cancel',
+
+  // steamcmd install
+  steamcmdProgress: 'steamcmd:progress',
+  steamcmdComplete: 'steamcmd:complete',
+  steamcmdError: 'steamcmd:error',
 } as const
 
 export type RealtimeEvent = (typeof RealtimeEvents)[keyof typeof RealtimeEvents]

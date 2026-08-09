@@ -4,6 +4,7 @@ export * from './realtime.js'
 export * from './deploy.js'
 export * from './settings.js'
 export * from './files.js'
+export * from './steamcmd.js'
 
 import { z } from 'zod'
 

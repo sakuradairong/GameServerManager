@@ -16,7 +16,7 @@ export const steamcmdExecutor: DeployExecutor = {
     const request = ctx.request as SteamDeployRequest
     const steamcmdPath = configManager.getConfig().steamcmd.path
     if (!steamcmdPath) {
-      throw new Error('未配置 SteamCMD 路径，请在 data/config.json 的 steamcmd.path 中设置')
+      throw new Error('未配置 SteamCMD，请在「设置」中一键安装或填写可执行文件路径')
     }
 
     try {

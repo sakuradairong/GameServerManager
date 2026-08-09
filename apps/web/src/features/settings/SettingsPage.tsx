@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { PublicConfig } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
 import { useAuth } from '../../shared/api/AuthContext'
+import { SteamcmdInstallCard } from './SteamcmdInstallCard'
 
 export function SettingsPage() {
   const { push } = useToast()
@@ -12,16 +13,19 @@ export function SettingsPage() {
   const [steamcmdPath, setSteamcmdPath] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const loadConfig = useCallback(async () => {
+    const data = await apiClient.get<PublicConfig>('/api/v1/config/public')
+    setConfig(data)
+    setInstallPath(data.game.defaultInstallPath)
+    setSteamcmdPath(data.steamcmd.path)
+    return data
+  }, [])
+
   useEffect(() => {
-    apiClient
-      .get<PublicConfig>('/api/v1/config/public')
-      .then((data) => {
-        setConfig(data)
-        setInstallPath(data.game.defaultInstallPath)
-        setSteamcmdPath(data.steamcmd.path)
-      })
-      .catch((error) => push(error instanceof Error ? error.message : '加载失败', 'error'))
-  }, [push])
+    loadConfig().catch((error) =>
+      push(error instanceof Error ? error.message : '加载失败', 'error'),
+    )
+  }, [loadConfig, push])
 
   async function onSave(event: FormEvent) {
     event.preventDefault()
@@ -47,6 +51,13 @@ export function SettingsPage() {
         <p className="page-desc">配置游戏安装根目录与 SteamCMD，保存后立即生效。</p>
       </div>
 
+      <SteamcmdInstallCard
+        onInstalled={(executablePath) => {
+          setSteamcmdPath(executablePath)
+          void loadConfig().catch(() => undefined)
+        }}
+      />
+
       <form className="page-card" onSubmit={onSave}>
         <h3 style={{ marginTop: 0 }}>路径</h3>
         <label className="field">
@@ -54,7 +65,7 @@ export function SettingsPage() {
           <input value={installPath} onChange={(e) => setInstallPath(e.target.value)} required />
         </label>
         <label className="field">
-          <span>SteamCMD 可执行文件路径</span>
+          <span>SteamCMD 可执行文件路径（也可手动填写）</span>
           <input
             value={steamcmdPath}
             onChange={(e) => setSteamcmdPath(e.target.value)}

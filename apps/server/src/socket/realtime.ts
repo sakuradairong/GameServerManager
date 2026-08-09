@@ -7,6 +7,7 @@ import { terminalService } from '../modules/terminal/TerminalService.js'
 import { instanceService } from '../modules/instance/InstanceService.js'
 import { progressBus } from '../modules/deploy/ProgressBus.js'
 import { deployService } from '../modules/deploy/DeployService.js'
+import { steamcmdInstallBus } from '../modules/steamcmd/SteamcmdInstallBus.js'
 
 declare module 'socket.io' {
   interface SocketData {
@@ -79,6 +80,16 @@ export function setupRealtime(httpServer: HttpServer) {
   })
   progressBus.onError((payload) => {
     io.emit(RealtimeEvents.deployError, payload)
+  })
+
+  steamcmdInstallBus.onProgress((progress) => {
+    io.emit(RealtimeEvents.steamcmdProgress, progress)
+  })
+  steamcmdInstallBus.onComplete((payload) => {
+    io.emit(RealtimeEvents.steamcmdComplete, payload)
+  })
+  steamcmdInstallBus.onError((payload) => {
+    io.emit(RealtimeEvents.steamcmdError, payload)
   })
 
   io.on('connection', (socket) => {
