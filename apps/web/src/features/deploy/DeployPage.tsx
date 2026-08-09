@@ -35,9 +35,16 @@ export function DeployPage() {
         </div>
       </div>
 
-      {tab === 'steamcmd' && <SteamDeployPanel />}
-      {tab === 'minecraft' && <MinecraftDeployPanel />}
-      {tab === 'archive' && <ArchiveDeployPanel />}
+      {/* 保持各面板挂载，避免切换时重复请求/闪烁提示 */}
+      <div hidden={tab !== 'steamcmd'}>
+        <SteamDeployPanel />
+      </div>
+      <div hidden={tab !== 'minecraft'}>
+        <MinecraftDeployPanel />
+      </div>
+      <div hidden={tab !== 'archive'}>
+        <ArchiveDeployPanel />
+      </div>
     </div>
   )
 }

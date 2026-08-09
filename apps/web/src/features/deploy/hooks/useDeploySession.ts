@@ -24,8 +24,9 @@ export function useDeploySession() {
   useEffect(() => {
     const socket = getSocket()
 
+    /** 仅处理当前会话事件，避免切换 Tab 时误收其它部署的错误/日志 */
     const match = (sessionId?: string) =>
-      !sessionIdRef.current || !sessionId || sessionId === sessionIdRef.current
+      Boolean(sessionIdRef.current && sessionId && sessionId === sessionIdRef.current)
 
     const onProgress = (payload: DeployProgress) => {
       if (!match(payload.sessionId)) return

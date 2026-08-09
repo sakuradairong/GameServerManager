@@ -11,15 +11,18 @@ export function SteamDeployPanel() {
   const [games, setGames] = useState<Record<string, SteamGameInfo>>({})
   const [gameKey, setGameKey] = useState('')
   const [instanceName, setInstanceName] = useState('')
-  const [steamConfigured, setSteamConfigured] = useState(false)
+  const [steamConfigured, setSteamConfigured] = useState<boolean | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     ;(async () => {
       try {
         const [catalog, config] = await Promise.all([
           apiClient.get<Record<string, SteamGameInfo>>('/api/v1/catalog/steam-games'),
           apiClient.get<{ steamcmd: { configured: boolean } }>('/api/v1/config/public'),
         ])
+        if (cancelled) return
         setGames(catalog)
         setSteamConfigured(config.steamcmd.configured)
         const first = Object.keys(catalog)[0]
@@ -28,9 +31,17 @@ export function SteamDeployPanel() {
           setInstanceName(catalog[first].game_nameCN || first)
         }
       } catch (error) {
-        push(error instanceof Error ? error.message : '加载目录失败', 'error')
+        if (!cancelled) {
+          push(error instanceof Error ? error.message : '加载目录失败', 'error')
+          setSteamConfigured(false)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     })()
+    return () => {
+      cancelled = true
+    }
   }, [push])
 
   async function onSubmit(event: FormEvent) {
@@ -60,16 +71,23 @@ export function SteamDeployPanel() {
       <form className="page-card" onSubmit={onSubmit}>
         <h3 style={{ marginTop: 0 }}>SteamCMD 部署</h3>
         <p className="page-desc">
-          通过统一 DeploySession 调用 steamcmd 执行器。需先在 `config.json` 配置
-          `steamcmd.path`。
+          通过统一 DeploySession 调用 steamcmd 执行器。可在「设置」中配置 SteamCMD 路径。
         </p>
-        {!steamConfigured && (
-          <p className="error-text">当前未配置 SteamCMD 路径，提交将失败（用于验证错误回滚）。</p>
+        {loading && <p className="muted">正在加载 Steam 目录与配置…</p>}
+        {!loading && steamConfigured === false && (
+          <p className="warn-text">
+            尚未配置 SteamCMD 可执行文件路径。请先到「设置」填写后再部署。
+          </p>
         )}
         <div className="form-grid">
           <label className="field">
             <span>游戏</span>
-            <select value={gameKey} onChange={(e) => setGameKey(e.target.value)} required>
+            <select
+              value={gameKey}
+              onChange={(e) => setGameKey(e.target.value)}
+              required
+              disabled={loading}
+            >
               {Object.entries(games).map(([key, info]) => (
                 <option key={key} value={key}>
                   {info.game_nameCN || key} ({info.appid})
@@ -83,11 +101,12 @@ export function SteamDeployPanel() {
               value={instanceName}
               onChange={(e) => setInstanceName(e.target.value)}
               required
+              disabled={loading}
             />
           </label>
         </div>
         <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="btn" type="submit" disabled={deploy.submitting}>
+          <button className="btn" type="submit" disabled={deploy.submitting || loading}>
             {deploy.submitting ? '提交中…' : '开始部署'}
           </button>
           <button
@@ -101,6 +120,7 @@ export function SteamDeployPanel() {
           <button
             className="btn btn-ghost"
             type="button"
+            disabled={loading}
             onClick={async () => {
               try {
                 const result = await apiClient.post<{ count: number }>(

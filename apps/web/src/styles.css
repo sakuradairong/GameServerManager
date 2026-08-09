@@ -334,6 +334,11 @@ input {
   color: #ff8d98;
 }
 
+.warn-text {
+  color: #e6b35c;
+  margin: 0 0 12px;
+}
+
 .terminal-layout {
   min-height: calc(100vh - 120px);
 }
