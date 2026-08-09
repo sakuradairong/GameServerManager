@@ -4,11 +4,11 @@ import {
   DeployCancelBodySchema,
   DeployRequestSchema,
   DeployUploadKindSchema,
-  DEPLOY_CAPABILITIES,
 } from '@gsm4/shared'
 import { requireAuth } from '../plugins/auth.js'
 import { deployService } from '../modules/deploy/DeployService.js'
 import { deployUploadService } from '../modules/deploy/DeployUploadService.js'
+import { getDeployPlatform, listAvailableCapabilities } from '../modules/deploy/platform.js'
 
 export const deployRoutes: FastifyPluginAsync = async (app) => {
   await app.register(multipart, {
@@ -21,7 +21,10 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/v1/deploy/capabilities', async () => ({
     success: true,
-    data: DEPLOY_CAPABILITIES,
+    data: {
+      platform: getDeployPlatform(),
+      capabilities: listAvailableCapabilities(),
+    },
   }))
 
   app.get('/api/v1/deploy/sessions', async () => ({

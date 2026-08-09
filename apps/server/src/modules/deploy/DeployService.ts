@@ -3,14 +3,18 @@ import type {
   DeployRequest,
   DeploySessionSummary,
   DeployStatus,
+  InstanceType,
 } from '@gsm4/shared'
 import { DeployRequestSchema } from '@gsm4/shared'
 import { instanceService } from '../instance/InstanceService.js'
 import { progressBus } from './ProgressBus.js'
 import { resolveInstallPath } from './pathPolicy.js'
+import { assertCapabilityAvailable } from './platform.js'
 import { archiveExecutor } from './executors/archiveExecutor.js'
 import { minecraftExecutor } from './executors/minecraftExecutor.js'
 import { steamcmdExecutor } from './executors/steamcmdExecutor.js'
+import { bedrockExecutor } from './executors/bedrockExecutor.js'
+import { tmodloaderExecutor } from './executors/tmodloaderExecutor.js'
 import type { DeployExecutor } from './executors/types.js'
 
 interface LiveSession extends DeploySessionSummary {
@@ -22,6 +26,25 @@ const executors: Record<DeployRequest['type'], DeployExecutor> = {
   archive: archiveExecutor,
   minecraft: minecraftExecutor,
   steamcmd: steamcmdExecutor,
+  bedrock: bedrockExecutor,
+  tmodloader: tmodloaderExecutor,
+}
+
+function resolveInstanceType(type: DeployRequest['type']): InstanceType {
+  switch (type) {
+    case 'steamcmd':
+      return 'steam'
+    case 'minecraft':
+      return 'minecraft'
+    case 'archive':
+      return 'archive'
+    case 'bedrock':
+      return 'bedrock'
+    case 'tmodloader':
+      return 'tmodloader'
+    default:
+      return 'generic'
+  }
 }
 
 export class DeployService {
@@ -38,6 +61,8 @@ export class DeployService {
 
   async start(raw: unknown): Promise<DeploySessionSummary> {
     const request = DeployRequestSchema.parse(raw)
+    assertCapabilityAvailable(request.type)
+
     const installName =
       request.type === 'steamcmd'
         ? request.installName || request.gameKey
@@ -57,12 +82,7 @@ export class DeployService {
       workingDirectory: installPath,
       startCommand: 'pending',
       description: `deploy:${request.type}`,
-      instanceType:
-        request.type === 'steamcmd'
-          ? 'steam'
-          : request.type === 'minecraft'
-            ? 'minecraft'
-            : 'archive',
+      instanceType: resolveInstanceType(request.type),
       steam:
         request.type === 'steamcmd'
           ? {
@@ -137,9 +157,14 @@ export class DeployService {
         throw new Error('部署已取消')
       }
 
+      if (result.workingDirectory) {
+        this.patch(session, { installPath: result.workingDirectory })
+      }
+
       await instanceService.finalizeDeploy(session.instanceId!, {
         startCommand: result.startCommand,
         terminalSessionId: result.terminalSessionId,
+        workingDirectory: result.workingDirectory || session.installPath,
       })
 
       this.patch(session, {

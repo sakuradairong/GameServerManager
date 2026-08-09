@@ -12,7 +12,14 @@ export type InstanceStatus = z.infer<typeof InstanceStatusSchema>
 export const StopCommandSchema = z.enum(['ctrl+c', 'stop', 'exit', 'quit'])
 export type StopCommand = z.infer<typeof StopCommandSchema>
 
-export const InstanceTypeSchema = z.enum(['generic', 'steam', 'minecraft', 'archive'])
+export const InstanceTypeSchema = z.enum([
+  'generic',
+  'steam',
+  'minecraft',
+  'archive',
+  'bedrock',
+  'tmodloader',
+])
 export type InstanceType = z.infer<typeof InstanceTypeSchema>
 
 export const InstanceSteamMetaSchema = z.object({

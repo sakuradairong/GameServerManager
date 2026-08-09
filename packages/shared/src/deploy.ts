@@ -1,7 +1,16 @@
 import { z } from 'zod'
 
-export const DeployTypeSchema = z.enum(['steamcmd', 'minecraft', 'archive'])
+export const DeployTypeSchema = z.enum([
+  'steamcmd',
+  'minecraft',
+  'archive',
+  'bedrock',
+  'tmodloader',
+])
 export type DeployType = z.infer<typeof DeployTypeSchema>
+
+export const DeployPlatformSchema = z.enum(['windows', 'linux', 'linux_arm'])
+export type DeployPlatform = z.infer<typeof DeployPlatformSchema>
 
 export const DeployStatusSchema = z.enum([
   'queued',
@@ -18,8 +27,10 @@ export type DeploySource = z.infer<typeof DeploySourceSchema>
 
 export const DeployCapabilitySchema = z.object({
   type: DeployTypeSchema,
-  platforms: z.array(z.enum(['windows', 'linux', 'linux_arm'])),
+  platforms: z.array(DeployPlatformSchema),
   label: z.string(),
+  requiresSponsor: z.boolean().optional(),
+  available: z.boolean().optional(),
 })
 export type DeployCapability = z.infer<typeof DeployCapabilitySchema>
 
@@ -38,6 +49,16 @@ export const DEPLOY_CAPABILITIES: DeployCapability[] = [
     type: 'archive',
     platforms: ['windows', 'linux', 'linux_arm'],
     label: '文件归档',
+  },
+  {
+    type: 'bedrock',
+    platforms: ['windows', 'linux'],
+    label: '基岩版',
+  },
+  {
+    type: 'tmodloader',
+    platforms: ['windows', 'linux'],
+    label: 'tModLoader',
   },
 ]
 
@@ -122,10 +143,31 @@ export const ArchiveDeployRequestSchema = z
   })
 export type ArchiveDeployRequest = z.infer<typeof ArchiveDeployRequestSchema>
 
+export const BedrockDeployRequestSchema = z.object({
+  type: z.literal('bedrock'),
+  instanceName: z.string().min(1).max(128),
+  installName: z.string().min(1).max(128),
+  versionType: z.enum(['stable', 'preview']).optional(),
+  customInstallPath: z.string().optional(),
+  allowCustomPath: z.boolean().optional(),
+})
+export type BedrockDeployRequest = z.infer<typeof BedrockDeployRequestSchema>
+
+export const TmodloaderDeployRequestSchema = z.object({
+  type: z.literal('tmodloader'),
+  instanceName: z.string().min(1).max(128),
+  installName: z.string().min(1).max(128),
+  customInstallPath: z.string().optional(),
+  allowCustomPath: z.boolean().optional(),
+})
+export type TmodloaderDeployRequest = z.infer<typeof TmodloaderDeployRequestSchema>
+
 export const DeployRequestSchema = z.union([
   SteamDeployRequestSchema,
   MinecraftDeployRequestSchema,
   ArchiveDeployRequestSchema,
+  BedrockDeployRequestSchema,
+  TmodloaderDeployRequestSchema,
 ])
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 

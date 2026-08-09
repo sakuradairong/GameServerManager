@@ -13,7 +13,11 @@ export interface ExecutorContext {
 
 export interface DeployExecutor {
   type: DeployRequest['type']
-  run(ctx: ExecutorContext): Promise<{ startCommand: string; terminalSessionId?: string }>
+  run(ctx: ExecutorContext): Promise<{
+    startCommand: string
+    terminalSessionId?: string
+    workingDirectory?: string
+  }>
 }
 
 export type SessionMutator = (patch: Partial<DeploySessionSummary>) => void
