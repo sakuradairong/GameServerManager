@@ -1,0 +1,10 @@
+{
+  "name": "gsm3",
+  "install": "npm run install:all",
+  "terminals": [
+    {
+      "name": "gsm3-dev",
+      "command": "npm run dev"
+    }
+  ]
+}
