@@ -377,11 +377,16 @@ input {
   min-height: 480px;
 }
 
-.deploy-tabs {
+.deploy-tabs,
+.source-picker {
   display: flex;
   gap: 8px;
   margin-top: 16px;
   flex-wrap: wrap;
+}
+
+.source-picker {
+  margin-top: 0;
 }
 
 .deploy-tab {

@@ -1,9 +1,22 @@
 import type { FastifyPluginAsync } from 'fastify'
-import { DeployCancelBodySchema, DeployRequestSchema, DEPLOY_CAPABILITIES } from '@gsm4/shared'
+import multipart from '@fastify/multipart'
+import {
+  DeployCancelBodySchema,
+  DeployRequestSchema,
+  DeployUploadKindSchema,
+  DEPLOY_CAPABILITIES,
+} from '@gsm4/shared'
 import { requireAuth } from '../plugins/auth.js'
 import { deployService } from '../modules/deploy/DeployService.js'
+import { deployUploadService } from '../modules/deploy/DeployUploadService.js'
 
 export const deployRoutes: FastifyPluginAsync = async (app) => {
+  await app.register(multipart, {
+    limits: {
+      fileSize: 512 * 1024 * 1024,
+    },
+  })
+
   app.addHook('preHandler', requireAuth)
 
   app.get('/api/v1/deploy/capabilities', async () => ({
@@ -27,6 +40,40 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       })
     }
     return { success: true, data: session }
+  })
+
+  app.post('/api/v1/deploy/upload', async (request, reply) => {
+    try {
+      const query = request.query as { kind?: string }
+      const kindParsed = DeployUploadKindSchema.safeParse(query.kind)
+      if (!kindParsed.success) {
+        return reply.code(400).send({
+          success: false,
+          error: 'VALIDATION_ERROR',
+          message: 'kind 必须是 minecraft 或 archive',
+        })
+      }
+
+      const file = await request.file()
+      if (!file) {
+        return reply.code(400).send({
+          success: false,
+          error: 'VALIDATION_ERROR',
+          message: '缺少上传文件',
+        })
+      }
+
+      const buffer = await file.toBuffer()
+      const uploaded = await deployUploadService.save(kindParsed.data, file.filename, buffer)
+      return { success: true, data: uploaded, message: '上传成功，可开始部署' }
+    } catch (error) {
+      const err = error as Error & { statusCode?: number }
+      return reply.code(err.statusCode ?? 500).send({
+        success: false,
+        error: 'DEPLOY_UPLOAD_FAILED',
+        message: err.message,
+      })
+    }
   })
 
   app.post('/api/v1/deploy', async (request, reply) => {

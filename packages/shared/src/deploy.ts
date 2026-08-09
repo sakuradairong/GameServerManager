@@ -13,6 +13,9 @@ export const DeployStatusSchema = z.enum([
 ])
 export type DeployStatus = z.infer<typeof DeployStatusSchema>
 
+export const DeploySourceSchema = z.enum(['url', 'upload'])
+export type DeploySource = z.infer<typeof DeploySourceSchema>
+
 export const DeployCapabilitySchema = z.object({
   type: DeployTypeSchema,
   platforms: z.array(z.enum(['windows', 'linux', 'linux_arm'])),
@@ -54,35 +57,89 @@ export const SteamDeployRequestSchema = z.object({
 })
 export type SteamDeployRequest = z.infer<typeof SteamDeployRequestSchema>
 
-export const MinecraftDeployRequestSchema = z.object({
-  type: z.literal('minecraft'),
-  instanceName: z.string().min(1).max(128),
-  installName: z.string().min(1).max(128),
-  downloadUrl: z.string().url(),
-  jarFileName: z.string().min(1).optional(),
-  javaCommand: z.string().optional(),
-  customInstallPath: z.string().optional(),
-  allowCustomPath: z.boolean().optional(),
-})
+export const MinecraftDeployRequestSchema = z
+  .object({
+    type: z.literal('minecraft'),
+    instanceName: z.string().min(1).max(128),
+    installName: z.string().min(1).max(128),
+    source: DeploySourceSchema.optional(),
+    downloadUrl: z.string().url().optional(),
+    uploadId: z.string().min(1).optional(),
+    jarFileName: z.string().min(1).optional(),
+    javaCommand: z.string().optional(),
+    customInstallPath: z.string().optional(),
+    allowCustomPath: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const source = value.source || (value.uploadId ? 'upload' : 'url')
+    if (source === 'upload') {
+      if (!value.uploadId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '上传部署需要 uploadId',
+          path: ['uploadId'],
+        })
+      }
+    } else if (!value.downloadUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'URL 部署需要 downloadUrl',
+        path: ['downloadUrl'],
+      })
+    }
+  })
 export type MinecraftDeployRequest = z.infer<typeof MinecraftDeployRequestSchema>
 
-export const ArchiveDeployRequestSchema = z.object({
-  type: z.literal('archive'),
-  instanceName: z.string().min(1).max(128),
-  installName: z.string().min(1).max(128),
-  archiveUrl: z.string().url(),
-  startCommand: z.string().min(1),
-  customInstallPath: z.string().optional(),
-  allowCustomPath: z.boolean().optional(),
-})
+export const ArchiveDeployRequestSchema = z
+  .object({
+    type: z.literal('archive'),
+    instanceName: z.string().min(1).max(128),
+    installName: z.string().min(1).max(128),
+    source: DeploySourceSchema.optional(),
+    archiveUrl: z.string().url().optional(),
+    uploadId: z.string().min(1).optional(),
+    startCommand: z.string().min(1),
+    customInstallPath: z.string().optional(),
+    allowCustomPath: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const source = value.source || (value.uploadId ? 'upload' : 'url')
+    if (source === 'upload') {
+      if (!value.uploadId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '上传部署需要 uploadId',
+          path: ['uploadId'],
+        })
+      }
+    } else if (!value.archiveUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'URL 部署需要 archiveUrl',
+        path: ['archiveUrl'],
+      })
+    }
+  })
 export type ArchiveDeployRequest = z.infer<typeof ArchiveDeployRequestSchema>
 
-export const DeployRequestSchema = z.discriminatedUnion('type', [
+export const DeployRequestSchema = z.union([
   SteamDeployRequestSchema,
   MinecraftDeployRequestSchema,
   ArchiveDeployRequestSchema,
 ])
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
+
+export const DeployUploadKindSchema = z.enum(['minecraft', 'archive'])
+export type DeployUploadKind = z.infer<typeof DeployUploadKindSchema>
+
+export const DeployUploadResultSchema = z.object({
+  uploadId: z.string(),
+  kind: DeployUploadKindSchema,
+  fileName: z.string(),
+  size: z.number(),
+  createdAt: z.string(),
+})
+export type DeployUploadResult = z.infer<typeof DeployUploadResultSchema>
 
 export const DeployCancelBodySchema = z.object({
   sessionId: z.string().min(1),
