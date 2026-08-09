@@ -12,7 +12,8 @@ panel/public/
 .augment/
 .trae/
 .windsurf/
-.cursor/
+.cursor/*
+!.cursor/environment.json
 .kiro/
 .agents/
 MCSManager/
