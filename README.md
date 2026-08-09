@@ -5,14 +5,15 @@ GSM4 是 GameServerManager 的下一代实现线（orphan 分支 `gsm4/main`）�
 - **GSM3**：仓库历史分支 `main`（遗产维护）
 - **GSM4**：本分支，按 [`docs/gsm4/`](docs/gsm4/README.md) 方案里程碑推进
 
-## 当前里程碑：M1
+## 当前里程碑：M2
 
-在 M0 骨架之上：
+在 M1 之上增加统一部署内核：
 
-- Home：主机信息 + CPU/内存/磁盘/Load 实时统计（Socket.IO）
-- 终端：多会话 PTY（`node-pty`），创建 / 输入 / resize / 关闭 / 重连
-- 实例：CRUD、启停重启、操作锁，启动时创建 PTY 并注入命令
-- 共享契约：`packages/shared` 中的 Instance / System / RealtimeEvents
+- `DeploySession`：校验 → 会话 → Executor → `deploy:*` 进度 → 实例提交/回滚
+- 执行器：`steamcmd` / `minecraft` / `archive`
+- Catalog：`installgame.json` 读写与远程同步
+- Web：`features/deploy` 三子页（非单文件巨页）
+- 验收说明：[`docs/gsm4/M2-验收说明.md`](docs/gsm4/M2-验收说明.md)
 
 ## 开发
 
