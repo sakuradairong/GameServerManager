@@ -83,6 +83,7 @@ export function SteamUpdateDialog({
             <label className="field">
               <span>目标分支</span>
               <input
+                autoComplete="off"
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 placeholder="public"
@@ -95,6 +96,7 @@ export function SteamUpdateDialog({
               <span>分支密码（可选）</span>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={betaPassword}
                 onChange={(e) => setBetaPassword(e.target.value)}
                 placeholder="私有 beta 分支需要"
@@ -119,12 +121,17 @@ export function SteamUpdateDialog({
             <div className="form-grid" style={{ marginTop: 8 }}>
               <label className="field">
                 <span>Steam 账号</span>
-                <input value={steamUsername} onChange={(e) => setSteamUsername(e.target.value)} />
+                <input
+                  autoComplete="off"
+                  value={steamUsername}
+                  onChange={(e) => setSteamUsername(e.target.value)}
+                />
               </label>
               <label className="field">
                 <span>Steam 密码</span>
                 <input
                   type="password"
+                  autoComplete="new-password"
                   value={steamPassword}
                   onChange={(e) => setSteamPassword(e.target.value)}
                 />
