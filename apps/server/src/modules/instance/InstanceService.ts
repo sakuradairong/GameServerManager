@@ -123,6 +123,46 @@ export class InstanceService {
     return this.locks.has(id)
   }
 
+  /** 开始一次 Steam 更新/分支切换：校验为 Steam 实例且空闲，加锁。 */
+  beginSteamUpdate(id: string): Instance {
+    const instance = this.require(id)
+    if (instance.instanceType !== 'steam' || !instance.steam?.appId) {
+      throw Object.assign(new Error('该实例不是 Steam 实例，无法更新'), { statusCode: 400 })
+    }
+    if (this.locks.has(id) || instance.status === 'running' || instance.status === 'starting') {
+      throw Object.assign(new Error('实例运行中或操作锁定，无法更新'), { statusCode: 409 })
+    }
+    this.locks.add(id)
+    return instance
+  }
+
+  /** Steam 更新成功：持久化新分支，解锁；不改动启动命令。 */
+  async commitSteamUpdate(id: string, patch: { branch?: string }): Promise<Instance> {
+    const current = this.require(id)
+    const next: Instance = {
+      ...current,
+      status: 'stopped',
+      errorMessage: undefined,
+      steam: current.steam
+        ? { ...current.steam, branch: patch.branch ?? current.steam.branch }
+        : current.steam,
+    }
+    this.instances.set(id, next)
+    this.locks.delete(id)
+    await this.persist()
+    return next
+  }
+
+  /** Steam 更新失败/取消：解锁并保留实例，记录错误信息。 */
+  async releaseSteamUpdate(id: string, errorMessage?: string): Promise<void> {
+    this.locks.delete(id)
+    const current = this.instances.get(id)
+    if (current) {
+      current.errorMessage = errorMessage
+      await this.persist()
+    }
+  }
+
   async update(id: string, body: UpdateInstanceBody): Promise<Instance> {
     const current = this.require(id)
     if (this.locks.has(id) || current.status === 'running' || current.status === 'starting') {

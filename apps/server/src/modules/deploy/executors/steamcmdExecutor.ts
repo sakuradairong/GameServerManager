@@ -40,12 +40,14 @@ export const steamcmdExecutor: DeployExecutor = {
 
     const branch =
       request.branch && request.branch !== 'public' ? ` -beta ${request.branch}` : ''
+    const betaPassword =
+      branch && request.betaPassword ? ` -betapassword ${quoteArg(request.betaPassword)}` : ''
     const script = [
       `@ShutdownOnFailedCommand 1`,
       `@NoPromptForPassword 1`,
       `force_install_dir ${quoteArg(ctx.installPath)}`,
       loginLine,
-      `app_update ${request.appId}${branch} validate`,
+      `app_update ${request.appId}${branch}${betaPassword} validate`,
       'quit',
       '',
     ].join('\n')

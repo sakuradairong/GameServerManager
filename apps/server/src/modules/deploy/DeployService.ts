@@ -4,6 +4,8 @@ import type {
   DeploySessionSummary,
   DeployStatus,
   InstanceType,
+  SteamDeployRequest,
+  SteamUpdateBody,
 } from '@gsm4/shared'
 import { DeployRequestSchema } from '@gsm4/shared'
 import { instanceService } from '../instance/InstanceService.js'
@@ -21,6 +23,10 @@ import type { DeployExecutor } from './executors/types.js'
 interface LiveSession extends DeploySessionSummary {
   controller: AbortController
   request: DeployRequest
+  /** create：新建实例部署；update：对已存在 Steam 实例更新/切分支 */
+  kind: 'create' | 'update'
+  /** update 模式下的目标分支，成功后写回实例 steam.branch */
+  steamTargetBranch?: string
 }
 
 const executors: Record<DeployRequest['type'], DeployExecutor> = {
@@ -108,6 +114,58 @@ export class DeployService {
       updatedAt: now,
       controller,
       request,
+      kind: 'create',
+    }
+    this.sessions.set(sessionId, session)
+
+    void this.runSession(session)
+    return this.toSummary(session)
+  }
+
+  /**
+   * 对已存在的 Steam 实例执行更新 / 分支切换。
+   * 复用 steamcmd 执行器与 deploy:* 进度事件，不新建实例、不改动启动命令。
+   */
+  async startSteamUpdate(instanceId: string, body: SteamUpdateBody): Promise<DeploySessionSummary> {
+    const instance = instanceService.get(instanceId)
+    if (!instance) {
+      throw Object.assign(new Error('实例不存在'), { statusCode: 404 })
+    }
+    if (instance.instanceType !== 'steam' || !instance.steam?.appId) {
+      throw Object.assign(new Error('该实例不是 Steam 实例，无法更新'), { statusCode: 400 })
+    }
+    assertCapabilityAvailable('steamcmd')
+
+    const targetBranch = (body.branch && body.branch.trim()) || instance.steam.branch || 'public'
+    const request: SteamDeployRequest = {
+      type: 'steamcmd',
+      appId: instance.steam.appId,
+      gameKey: instance.steam.gameKey || instance.name,
+      instanceName: instance.name,
+      branch: targetBranch,
+      betaPassword: body.betaPassword,
+      anonymous: body.anonymous,
+      steamUsername: body.steamUsername,
+      steamPassword: body.steamPassword,
+    }
+
+    // 加锁（运行中/锁定会抛错），确保不会与启停或另一次更新并发
+    instanceService.beginSteamUpdate(instanceId)
+
+    const sessionId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const session: LiveSession = {
+      sessionId,
+      type: 'steamcmd',
+      status: 'queued',
+      instanceId,
+      installPath: instance.workingDirectory,
+      createdAt: now,
+      updatedAt: now,
+      controller: new AbortController(),
+      request,
+      kind: 'update',
+      steamTargetBranch: targetBranch,
     }
     this.sessions.set(sessionId, session)
 
@@ -161,20 +219,28 @@ export class DeployService {
         throw new Error('部署已取消')
       }
 
-      if (result.workingDirectory) {
-        this.patch(session, { installPath: result.workingDirectory })
+      if (session.kind === 'update') {
+        // 更新模式：写回分支，保留实例与原启动命令
+        await instanceService.commitSteamUpdate(session.instanceId!, {
+          branch: session.steamTargetBranch,
+        })
+        this.patch(session, { status: 'completed' })
+      } else {
+        if (result.workingDirectory) {
+          this.patch(session, { installPath: result.workingDirectory })
+        }
+
+        await instanceService.finalizeDeploy(session.instanceId!, {
+          startCommand: result.startCommand,
+          terminalSessionId: result.terminalSessionId,
+          workingDirectory: result.workingDirectory || session.installPath,
+        })
+
+        this.patch(session, {
+          status: 'completed',
+          terminalSessionId: result.terminalSessionId,
+        })
       }
-
-      await instanceService.finalizeDeploy(session.instanceId!, {
-        startCommand: result.startCommand,
-        terminalSessionId: result.terminalSessionId,
-        workingDirectory: result.workingDirectory || session.installPath,
-      })
-
-      this.patch(session, {
-        status: 'completed',
-        terminalSessionId: result.terminalSessionId,
-      })
       progressBus.emitProgress({
         sessionId: session.sessionId,
         percent: 100,
@@ -188,13 +254,21 @@ export class DeployService {
       const status: DeployStatus = cancelled ? 'cancelled' : 'failed'
 
       if (session.instanceId) {
-        await instanceService.rollbackDeploy(session.instanceId).catch(() => undefined)
+        if (session.kind === 'update') {
+          // 更新失败/取消：解锁并保留实例（分支不变）
+          await instanceService
+            .releaseSteamUpdate(session.instanceId, cancelled ? undefined : message)
+            .catch(() => undefined)
+        } else {
+          await instanceService.rollbackDeploy(session.instanceId).catch(() => undefined)
+        }
       }
 
       this.patch(session, {
         status,
         error: message,
-        instanceId: undefined,
+        // 更新模式实例仍存在，保留 instanceId；新建模式失败已回滚删除
+        instanceId: session.kind === 'update' ? session.instanceId : undefined,
       })
       progressBus.emitError(session.sessionId, message)
       progressBus.emitLog({
