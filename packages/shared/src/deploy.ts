@@ -6,6 +6,7 @@ export const DeployTypeSchema = z.enum([
   'archive',
   'bedrock',
   'tmodloader',
+  'mrpack',
 ])
 export type DeployType = z.infer<typeof DeployTypeSchema>
 
@@ -60,7 +61,15 @@ export const DEPLOY_CAPABILITIES: DeployCapability[] = [
     platforms: ['windows', 'linux'],
     label: 'tModLoader',
   },
+  {
+    type: 'mrpack',
+    platforms: ['windows', 'linux', 'linux_arm'],
+    label: 'Modrinth 整合包',
+  },
 ]
+
+export const MrpackLoaderSchema = z.enum(['fabric', 'quilt', 'forge', 'neoforge'])
+export type MrpackLoader = z.infer<typeof MrpackLoaderSchema>
 
 export const SteamDeployRequestSchema = z.object({
   type: z.literal('steamcmd'),
@@ -162,16 +171,54 @@ export const TmodloaderDeployRequestSchema = z.object({
 })
 export type TmodloaderDeployRequest = z.infer<typeof TmodloaderDeployRequestSchema>
 
+export const MrpackDeployRequestSchema = z
+  .object({
+    type: z.literal('mrpack'),
+    instanceName: z.string().min(1).max(128),
+    installName: z.string().min(1).max(128),
+    source: DeploySourceSchema.optional(),
+    mrpackUrl: z.string().url().optional(),
+    uploadId: z.string().min(1).optional(),
+    /** 覆盖自动检测的加载器；缺省时按 modrinth.index.json 的 dependencies 推断 */
+    loaderType: MrpackLoaderSchema.optional(),
+    /** 覆盖整合包声明的 Minecraft 版本 */
+    minecraftVersion: z.string().min(1).optional(),
+    /** 自定义 Java 启动命令（含内存参数）；缺省时按加载器生成 */
+    javaCommand: z.string().optional(),
+    customInstallPath: z.string().optional(),
+    allowCustomPath: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const source = value.source || (value.uploadId ? 'upload' : 'url')
+    if (source === 'upload') {
+      if (!value.uploadId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '上传部署需要 uploadId',
+          path: ['uploadId'],
+        })
+      }
+    } else if (!value.mrpackUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'URL 部署需要 mrpackUrl',
+        path: ['mrpackUrl'],
+      })
+    }
+  })
+export type MrpackDeployRequest = z.infer<typeof MrpackDeployRequestSchema>
+
 export const DeployRequestSchema = z.union([
   SteamDeployRequestSchema,
   MinecraftDeployRequestSchema,
   ArchiveDeployRequestSchema,
   BedrockDeployRequestSchema,
   TmodloaderDeployRequestSchema,
+  MrpackDeployRequestSchema,
 ])
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 
-export const DeployUploadKindSchema = z.enum(['minecraft', 'archive'])
+export const DeployUploadKindSchema = z.enum(['minecraft', 'archive', 'mrpack'])
 export type DeployUploadKind = z.infer<typeof DeployUploadKindSchema>
 
 export const DeployUploadResultSchema = z.object({

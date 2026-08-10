@@ -7,6 +7,7 @@ import { MinecraftDeployPanel } from './minecraft/MinecraftDeployPanel'
 import { ArchiveDeployPanel } from './archive/ArchiveDeployPanel'
 import { BedrockDeployPanel } from './bedrock/BedrockDeployPanel'
 import { TmodloaderDeployPanel } from './tmodloader/TmodloaderDeployPanel'
+import { MrpackDeployPanel } from './mrpack/MrpackDeployPanel'
 
 type CapabilitiesResponse = {
   platform: DeployPlatform
@@ -99,6 +100,9 @@ export function DeployPage() {
       </div>
       <div hidden={tab !== 'tmodloader'}>
         <TmodloaderDeployPanel />
+      </div>
+      <div hidden={tab !== 'mrpack'}>
+        <MrpackDeployPanel />
       </div>
     </div>
   )

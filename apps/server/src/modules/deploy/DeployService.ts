@@ -15,6 +15,7 @@ import { minecraftExecutor } from './executors/minecraftExecutor.js'
 import { steamcmdExecutor } from './executors/steamcmdExecutor.js'
 import { bedrockExecutor } from './executors/bedrockExecutor.js'
 import { tmodloaderExecutor } from './executors/tmodloaderExecutor.js'
+import { mrpackExecutor } from './executors/mrpackExecutor.js'
 import type { DeployExecutor } from './executors/types.js'
 
 interface LiveSession extends DeploySessionSummary {
@@ -28,6 +29,7 @@ const executors: Record<DeployRequest['type'], DeployExecutor> = {
   steamcmd: steamcmdExecutor,
   bedrock: bedrockExecutor,
   tmodloader: tmodloaderExecutor,
+  mrpack: mrpackExecutor,
 }
 
 function resolveInstanceType(type: DeployRequest['type']): InstanceType {
@@ -42,6 +44,8 @@ function resolveInstanceType(type: DeployRequest['type']): InstanceType {
       return 'bedrock'
     case 'tmodloader':
       return 'tmodloader'
+    case 'mrpack':
+      return 'mrpack'
     default:
       return 'generic'
   }

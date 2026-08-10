@@ -19,6 +19,7 @@ export const InstanceTypeSchema = z.enum([
   'archive',
   'bedrock',
   'tmodloader',
+  'mrpack',
 ])
 export type InstanceType = z.infer<typeof InstanceTypeSchema>
 
