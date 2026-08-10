@@ -7,6 +7,7 @@ export const DeployTypeSchema = z.enum([
   'bedrock',
   'tmodloader',
   'mrpack',
+  'factorio',
 ])
 export type DeployType = z.infer<typeof DeployTypeSchema>
 
@@ -65,6 +66,12 @@ export const DEPLOY_CAPABILITIES: DeployCapability[] = [
     type: 'mrpack',
     platforms: ['windows', 'linux', 'linux_arm'],
     label: 'Modrinth 整合包',
+  },
+  {
+    // Factorio 官方仅提供 linux64 headless（tar.xz，x86_64）
+    type: 'factorio',
+    platforms: ['linux'],
+    label: 'Factorio',
   },
 ]
 
@@ -220,6 +227,17 @@ export const MrpackDeployRequestSchema = z
   })
 export type MrpackDeployRequest = z.infer<typeof MrpackDeployRequestSchema>
 
+export const FactorioDeployRequestSchema = z.object({
+  type: z.literal('factorio'),
+  instanceName: z.string().min(1).max(128),
+  installName: z.string().min(1).max(128),
+  /** stable / latest / 具体版本号（如 1.1.110）；缺省 stable */
+  version: z.string().min(1).max(64).optional(),
+  customInstallPath: z.string().optional(),
+  allowCustomPath: z.boolean().optional(),
+})
+export type FactorioDeployRequest = z.infer<typeof FactorioDeployRequestSchema>
+
 export const DeployRequestSchema = z.union([
   SteamDeployRequestSchema,
   MinecraftDeployRequestSchema,
@@ -227,6 +245,7 @@ export const DeployRequestSchema = z.union([
   BedrockDeployRequestSchema,
   TmodloaderDeployRequestSchema,
   MrpackDeployRequestSchema,
+  FactorioDeployRequestSchema,
 ])
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 
