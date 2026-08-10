@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { DeploySessionSummary, Instance, SteamUpdateBody } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
@@ -25,14 +25,18 @@ export function SteamUpdateDialog({
   const [submitting, setSubmitting] = useState(false)
 
   const status = deploy.session?.status
+  const sessionId = deploy.session?.sessionId
   const running = status === 'queued' || status === 'running' || status === 'cancelling'
 
+  // 每个会话只处理一次完成事件，避免父级回调标识变化导致的重复提示/刷新
+  const handledSessionRef = useRef<string | null>(null)
   useEffect(() => {
-    if (status === 'completed') {
+    if (status === 'completed' && sessionId && handledSessionRef.current !== sessionId) {
+      handledSessionRef.current = sessionId
       push('Steam 更新完成', 'success')
       onUpdated()
     }
-  }, [status, push, onUpdated])
+  }, [status, sessionId, push, onUpdated])
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
