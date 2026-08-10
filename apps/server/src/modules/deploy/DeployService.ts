@@ -19,6 +19,7 @@ import { bedrockExecutor } from './executors/bedrockExecutor.js'
 import { tmodloaderExecutor } from './executors/tmodloaderExecutor.js'
 import { mrpackExecutor } from './executors/mrpackExecutor.js'
 import { factorioExecutor } from './executors/factorioExecutor.js'
+import { cloudExecutor } from './executors/cloudExecutor.js'
 import type { DeployExecutor } from './executors/types.js'
 
 interface LiveSession extends DeploySessionSummary {
@@ -38,6 +39,7 @@ const executors: Record<DeployRequest['type'], DeployExecutor> = {
   tmodloader: tmodloaderExecutor,
   mrpack: mrpackExecutor,
   factorio: factorioExecutor,
+  cloud: cloudExecutor,
 }
 
 function resolveInstanceType(type: DeployRequest['type']): InstanceType {
@@ -56,6 +58,8 @@ function resolveInstanceType(type: DeployRequest['type']): InstanceType {
       return 'mrpack'
     case 'factorio':
       return 'factorio'
+    case 'cloud':
+      return 'cloud'
     default:
       return 'generic'
   }

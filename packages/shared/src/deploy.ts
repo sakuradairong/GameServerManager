@@ -8,6 +8,7 @@ export const DeployTypeSchema = z.enum([
   'tmodloader',
   'mrpack',
   'factorio',
+  'cloud',
 ])
 export type DeployType = z.infer<typeof DeployTypeSchema>
 
@@ -72,6 +73,11 @@ export const DEPLOY_CAPABILITIES: DeployCapability[] = [
     type: 'factorio',
     platforms: ['linux'],
     label: 'Factorio',
+  },
+  {
+    type: 'cloud',
+    platforms: ['windows', 'linux', 'linux_arm'],
+    label: '云构建',
   },
 ]
 
@@ -238,6 +244,63 @@ export const FactorioDeployRequestSchema = z.object({
 })
 export type FactorioDeployRequest = z.infer<typeof FactorioDeployRequestSchema>
 
+export const CloudBuildParamsSchema = z.object({
+  coreType: z.string().trim().min(1).max(64),
+  version: z.string().trim().min(1).max(128),
+  mcVersion: z.string().trim().min(1).max(128),
+})
+export type CloudBuildParams = z.infer<typeof CloudBuildParamsSchema>
+
+export const CloudBuildCatalogSchema = z
+  .object({
+    coreTypes: z.array(z.string().min(1)).optional(),
+    versions: z.array(z.string().min(1)).optional(),
+  })
+  .passthrough()
+  .refine((value) => Boolean(value.coreTypes || value.versions), {
+    message: '云构建目录响应缺少 coreTypes 或 versions',
+  })
+export type CloudBuildCatalog = z.infer<typeof CloudBuildCatalogSchema>
+
+export const CloudBuildTaskCreatedSchema = z
+  .object({
+    requestId: z.string().min(1),
+    accessToken: z.string().min(1),
+    message: z.string().optional(),
+  })
+  .passthrough()
+export type CloudBuildTaskCreated = z.infer<typeof CloudBuildTaskCreatedSchema>
+
+export const CloudBuildArtifactSchema = z
+  .object({
+    downloadUrl: z.string().min(1),
+    archiveFileName: z.string().min(1).optional(),
+    coreType: z.string().optional(),
+    version: z.string().optional(),
+    mcVersion: z.string().optional(),
+  })
+  .passthrough()
+export type CloudBuildArtifact = z.infer<typeof CloudBuildArtifactSchema>
+
+export const CloudBuildTaskStatusSchema = z
+  .object({
+    requestId: z.string().optional(),
+    status: z.string().min(1),
+    message: z.string().optional(),
+    data: z.unknown().optional(),
+  })
+  .passthrough()
+export type CloudBuildTaskStatus = z.infer<typeof CloudBuildTaskStatusSchema>
+
+export const CloudDeployRequestSchema = CloudBuildParamsSchema.extend({
+  type: z.literal('cloud'),
+  instanceName: z.string().min(1).max(128),
+  installName: z.string().min(1).max(128),
+  customInstallPath: z.string().optional(),
+  allowCustomPath: z.boolean().optional(),
+})
+export type CloudDeployRequest = z.infer<typeof CloudDeployRequestSchema>
+
 export const DeployRequestSchema = z.union([
   SteamDeployRequestSchema,
   MinecraftDeployRequestSchema,
@@ -246,6 +309,7 @@ export const DeployRequestSchema = z.union([
   TmodloaderDeployRequestSchema,
   MrpackDeployRequestSchema,
   FactorioDeployRequestSchema,
+  CloudDeployRequestSchema,
 ])
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 
