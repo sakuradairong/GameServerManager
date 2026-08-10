@@ -96,6 +96,17 @@ export function useDeploySession() {
     getSocket().emit(RealtimeEvents.deployCancel, { sessionId })
   }, [])
 
+  /**
+   * 绑定一个由其它接口创建的部署会话（如 Steam 更新），复用 deploy:* 进度/日志订阅。
+   */
+  const attach = useCallback((created: DeploySessionSummary) => {
+    setError(null)
+    setLogs([])
+    setProgress(null)
+    sessionIdRef.current = created.sessionId
+    setSession(created)
+  }, [])
+
   return {
     session,
     progress,
@@ -104,5 +115,6 @@ export function useDeploySession() {
     submitting,
     start,
     cancel,
+    attach,
   }
 }

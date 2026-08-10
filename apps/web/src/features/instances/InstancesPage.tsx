@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { CreateInstanceBody, Instance } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
+import { SteamUpdateDialog } from './SteamUpdateDialog'
 
 const emptyForm: CreateInstanceBody = {
   name: '',
@@ -20,6 +21,7 @@ export function InstancesPage() {
   const [form, setForm] = useState<CreateInstanceBody>(emptyForm)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [steamUpdateInstance, setSteamUpdateInstance] = useState<Instance | null>(null)
 
   const refresh = useCallback(async () => {
     const data = await apiClient.get<Instance[]>('/api/v1/instances')
@@ -144,9 +146,21 @@ export function InstancesPage() {
             {instances.map((instance) => (
               <div key={instance.id} className="table-row">
                 <div>
-                  <div style={{ fontWeight: 600 }}>{instance.name}</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {instance.name}
+                    {instance.instanceType && instance.instanceType !== 'generic' && (
+                      <span className="status-pill" style={{ marginLeft: 8 }}>
+                        {instance.instanceType}
+                      </span>
+                    )}
+                  </div>
                   <div className="muted">{instance.workingDirectory}</div>
                   <div className="muted">{instance.startCommand}</div>
+                  {instance.instanceType === 'steam' && instance.steam && (
+                    <div className="muted">
+                      appId {instance.steam.appId} · 分支 {instance.steam.branch || 'public'}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <span className={`status-pill status-${instance.status}`}>{instance.status}</span>
@@ -192,6 +206,16 @@ export function InstancesPage() {
                       终端
                     </button>
                   )}
+                  {instance.instanceType === 'steam' && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={busyId === instance.id}
+                      onClick={() => setSteamUpdateInstance(instance)}
+                    >
+                      更新/分支
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-danger"
@@ -206,6 +230,16 @@ export function InstancesPage() {
           </div>
         )}
       </div>
+
+      {steamUpdateInstance && (
+        <SteamUpdateDialog
+          instance={steamUpdateInstance}
+          onClose={() => setSteamUpdateInstance(null)}
+          onUpdated={() => {
+            refresh().catch(() => undefined)
+          }}
+        />
+      )}
     </div>
   )
 }

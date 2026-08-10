@@ -1,7 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify'
-import { CreateInstanceBodySchema, UpdateInstanceBodySchema } from '@gsm4/shared'
+import {
+  CreateInstanceBodySchema,
+  SteamUpdateBodySchema,
+  UpdateInstanceBodySchema,
+} from '@gsm4/shared'
 import { requireAuth } from '../plugins/auth.js'
 import { instanceService } from '../modules/instance/InstanceService.js'
+import { deployService } from '../modules/deploy/DeployService.js'
 
 export const instanceRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', requireAuth)
@@ -126,6 +131,31 @@ export const instanceRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(err.statusCode ?? 500).send({
         success: false,
         error: 'RESTART_FAILED',
+        message: err.message,
+      })
+    }
+  })
+
+  // Steam 更新 / 分支切换：复用 DeploySession 与 deploy:* 进度事件
+  app.post('/api/v1/instances/:id/steam/update', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const parsed = SteamUpdateBodySchema.safeParse(request.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({
+        success: false,
+        error: 'VALIDATION_ERROR',
+        message: '更新参数无效',
+        details: parsed.error.flatten(),
+      })
+    }
+    try {
+      const session = await deployService.startSteamUpdate(id, parsed.data)
+      return { success: true, data: session, message: '已开始更新' }
+    } catch (error) {
+      const err = error as Error & { statusCode?: number }
+      return reply.code(err.statusCode ?? 500).send({
+        success: false,
+        error: 'STEAM_UPDATE_FAILED',
         message: err.message,
       })
     }

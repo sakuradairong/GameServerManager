@@ -71,12 +71,24 @@ export const SteamDeployRequestSchema = z.object({
   customInstallPath: z.string().optional(),
   allowCustomPath: z.boolean().optional(),
   branch: z.string().optional(),
+  betaPassword: z.string().optional(),
   anonymous: z.boolean().optional(),
   steamUsername: z.string().optional(),
   steamPassword: z.string().optional(),
   startCommand: z.string().optional(),
 })
 export type SteamDeployRequest = z.infer<typeof SteamDeployRequestSchema>
+
+/** 对已存在的 Steam 实例执行更新 / 分支切换（复用 steamcmd 执行器与 deploy:* 进度） */
+export const SteamUpdateBodySchema = z.object({
+  /** 目标分支；缺省时沿用实例当前分支或 public */
+  branch: z.string().max(128).optional(),
+  betaPassword: z.string().optional(),
+  anonymous: z.boolean().optional(),
+  steamUsername: z.string().optional(),
+  steamPassword: z.string().optional(),
+})
+export type SteamUpdateBody = z.infer<typeof SteamUpdateBodySchema>
 
 export const MinecraftDeployRequestSchema = z
   .object({
