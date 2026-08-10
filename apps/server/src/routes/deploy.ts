@@ -53,7 +53,7 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(400).send({
           success: false,
           error: 'VALIDATION_ERROR',
-          message: 'kind 必须是 minecraft 或 archive',
+          message: 'kind 必须是 minecraft、archive 或 mrpack',
         })
       }
 

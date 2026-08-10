@@ -11,6 +11,13 @@ interface StoredUpload extends DeployUploadResult {
 const ALLOWED_EXT: Record<DeployUploadKind, Set<string>> = {
   minecraft: new Set(['.jar']),
   archive: new Set(['.zip']),
+  mrpack: new Set(['.mrpack', '.zip']),
+}
+
+const EXT_ERROR: Record<DeployUploadKind, string> = {
+  minecraft: '仅支持上传 .jar 文件',
+  archive: '仅支持上传 .zip 文件',
+  mrpack: '仅支持上传 .mrpack 文件',
 }
 
 export class DeployUploadService {
@@ -28,10 +35,7 @@ export class DeployUploadService {
 
     const ext = path.extname(safeName).toLowerCase()
     if (!ALLOWED_EXT[kind].has(ext)) {
-      throw Object.assign(
-        new Error(kind === 'minecraft' ? '仅支持上传 .jar 文件' : '仅支持上传 .zip 文件'),
-        { statusCode: 400 },
-      )
+      throw Object.assign(new Error(EXT_ERROR[kind]), { statusCode: 400 })
     }
 
     const uploadId = crypto.randomUUID()
@@ -70,9 +74,14 @@ export class DeployUploadService {
         if (!fileName) throw new Error('empty')
         const absolutePath = path.join(dir, fileName)
         const stat = await fs.stat(absolutePath)
+        const inferredKind: DeployUploadKind = fileName.endsWith('.jar')
+          ? 'minecraft'
+          : fileName.endsWith('.mrpack')
+            ? 'mrpack'
+            : 'archive'
         stored = {
           uploadId,
-          kind: expectedKind || (fileName.endsWith('.jar') ? 'minecraft' : 'archive'),
+          kind: expectedKind || inferredKind,
           fileName,
           size: stat.size,
           createdAt: stat.mtime.toISOString(),
