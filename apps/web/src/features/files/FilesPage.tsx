@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { FileEntry, FileListResult } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
+
+const FILE_PAGE_SIZE = 200
 
 export function FilesPage() {
   const { push } = useToast()
@@ -13,6 +15,19 @@ export function FilesPage() {
   const [mkdirName, setMkdirName] = useState('')
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [filePage, setFilePage] = useState(0)
+
+  const entryPages = useMemo(() => {
+    const entries = listing?.entries ?? []
+    const pages: FileEntry[][] = []
+    for (let i = 0; i < entries.length; i += FILE_PAGE_SIZE) {
+      pages.push(entries.slice(i, i + FILE_PAGE_SIZE))
+    }
+    return pages.length > 0 ? pages : [[]]
+  }, [listing?.entries])
+
+  const visibleEntries = entryPages[filePage] ?? []
+  const totalPages = entryPages.length
 
   const refresh = useCallback(
     async (path = currentPath) => {
@@ -23,6 +38,7 @@ export function FilesPage() {
         )
         setListing(data)
         setCurrentPath(data.path)
+        setFilePage(0)
       } catch (error) {
         push(error instanceof ApiError ? error.message : '列出文件失败', 'error')
       } finally {
@@ -156,9 +172,12 @@ export function FilesPage() {
         <div className="page-card">
           <div className="muted" style={{ marginBottom: 8 }}>
             /{currentPath}
+            {listing && listing.entries.length > FILE_PAGE_SIZE
+              ? ` · 第 ${filePage + 1}/${totalPages} 页（共 ${listing.entries.length} 项）`
+              : ''}
           </div>
           <div className="table">
-            {(listing?.entries || []).map((entry) => (
+            {visibleEntries.map((entry) => (
               <div key={entry.path} className="table-row files-row">
                 <button type="button" className="file-link" onClick={() => void openEntry(entry)}>
                   <span className="muted">{entry.isDirectory ? '[DIR]' : '[FILE]'}</span> {entry.name}
@@ -179,6 +198,26 @@ export function FilesPage() {
             ))}
             {listing && listing.entries.length === 0 && <p className="muted">空目录</p>}
           </div>
+          {totalPages > 1 && (
+            <div className="row-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={filePage <= 0}
+                onClick={() => setFilePage((page) => Math.max(0, page - 1))}
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={filePage >= totalPages - 1}
+                onClick={() => setFilePage((page) => Math.min(totalPages - 1, page + 1))}
+              >
+                下一页
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="page-card">

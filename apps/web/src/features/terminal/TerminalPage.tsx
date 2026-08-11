@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -14,16 +14,39 @@ interface SessionMeta {
   pid: number
 }
 
+const SessionItem = memo(function SessionItem({
+  session,
+  active,
+  onSelect,
+}: {
+  session: SessionMeta
+  active: boolean
+  onSelect: (sessionId: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`session-item${active ? ' active' : ''}`}
+      onClick={() => onSelect(session.sessionId)}
+    >
+      <div>{session.name}</div>
+      <div className="muted">{session.cwd}</div>
+    </button>
+  )
+})
+
 export function TerminalPage() {
   const { push } = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialSession = searchParams.get('sessionId')
+  const initialSessionRef = useRef(searchParams.get('sessionId'))
   const [sessions, setSessions] = useState<SessionMeta[]>([])
-  const [activeId, setActiveId] = useState<string | null>(initialSession)
+  const [activeId, setActiveId] = useState<string | null>(initialSessionRef.current)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const activeIdRef = useRef<string | null>(activeId)
+  const outputBufferRef = useRef('')
+  const outputRafRef = useRef<number | null>(null)
 
   useEffect(() => {
     activeIdRef.current = activeId
@@ -37,6 +60,7 @@ export function TerminalPage() {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
+      scrollback: 1000,
       theme: {
         background: '#0b1016',
         foreground: '#e7eef7',
@@ -71,6 +95,10 @@ export function TerminalPage() {
 
     return () => {
       window.removeEventListener('resize', onResize)
+      if (outputRafRef.current != null) {
+        cancelAnimationFrame(outputRafRef.current)
+        outputRafRef.current = null
+      }
       term.dispose()
       termRef.current = null
       fitRef.current = null
@@ -78,6 +106,20 @@ export function TerminalPage() {
   }, [socket])
 
   useEffect(() => {
+    const initialId = initialSessionRef.current
+    if (!initialId) return
+    socket.emit(RealtimeEvents.reconnectSession, { sessionId: initialId })
+  }, [socket])
+
+  useEffect(() => {
+    const flushOutput = () => {
+      outputRafRef.current = null
+      const chunk = outputBufferRef.current
+      if (!chunk) return
+      outputBufferRef.current = ''
+      termRef.current?.write(chunk)
+    }
+
     const onList = (list: SessionMeta[]) => setSessions(list)
     const onCreated = (payload: SessionMeta & { buffer?: string }) => {
       setSessions((prev) => {
@@ -91,7 +133,10 @@ export function TerminalPage() {
     }
     const onOutput = (payload: { sessionId: string; data: string }) => {
       if (payload.sessionId !== activeIdRef.current) return
-      termRef.current?.write(payload.data)
+      outputBufferRef.current += payload.data
+      if (outputRafRef.current == null) {
+        outputRafRef.current = requestAnimationFrame(flushOutput)
+      }
     }
     const onClosed = (payload: { sessionId: string }) => {
       setSessions((prev) => prev.filter((item) => item.sessionId !== payload.sessionId))
@@ -122,10 +167,6 @@ export function TerminalPage() {
     socket.on(RealtimeEvents.sessionReconnectFailed, onReconnectFailed)
     socket.on(RealtimeEvents.terminalError, onError)
 
-    if (initialSession) {
-      socket.emit(RealtimeEvents.reconnectSession, { sessionId: initialSession })
-    }
-
     return () => {
       socket.off(RealtimeEvents.sessionList, onList)
       socket.off(RealtimeEvents.ptyCreated, onCreated)
@@ -135,7 +176,7 @@ export function TerminalPage() {
       socket.off(RealtimeEvents.sessionReconnectFailed, onReconnectFailed)
       socket.off(RealtimeEvents.terminalError, onError)
     }
-  }, [socket, initialSession, push, setSearchParams])
+  }, [socket, push, setSearchParams])
 
   function createSession() {
     const term = termRef.current
@@ -185,15 +226,12 @@ export function TerminalPage() {
             <p className="muted">暂无会话</p>
           ) : (
             sessions.map((session) => (
-              <button
+              <SessionItem
                 key={session.sessionId}
-                type="button"
-                className={`session-item${activeId === session.sessionId ? ' active' : ''}`}
-                onClick={() => selectSession(session.sessionId)}
-              >
-                <div>{session.name}</div>
-                <div className="muted">{session.cwd}</div>
-              </button>
+                session={session}
+                active={activeId === session.sessionId}
+                onSelect={selectSession}
+              />
             ))
           )}
         </aside>
