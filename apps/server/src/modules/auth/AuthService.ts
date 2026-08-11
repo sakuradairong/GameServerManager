@@ -43,6 +43,7 @@ const UsersFileSchema = z.object({
 export class AuthService {
   private registering = false
   private usersCache: UsersFile | null = null
+  private tokenVerifyCache = new Map<string, { payload: AuthTokenPayload; expiresAt: number }>()
 
   private usersPath(): string {
     return path.join(configManager.getDataDir(), 'users.json')
@@ -67,6 +68,7 @@ export class AuthService {
 
   private invalidateUsersCache() {
     this.usersCache = null
+    this.tokenVerifyCache.clear()
   }
 
   private async writeUsers(data: UsersFile): Promise<void> {
@@ -140,6 +142,12 @@ export class AuthService {
   }
 
   async verifyToken(token: string): Promise<AuthTokenPayload> {
+    const now = Date.now()
+    const cached = this.tokenVerifyCache.get(token)
+    if (cached && cached.expiresAt > now) {
+      return cached.payload
+    }
+
     const { secret } = configManager.getConfig().jwt
     const payload = AuthTokenPayloadSchema.parse(jwt.verify(token, secret))
     const data = await this.readUsers()
@@ -147,6 +155,12 @@ export class AuthService {
     if (!user || user.username !== payload.username || user.role !== payload.role) {
       throw new Error('认证用户不存在或已失效')
     }
+
+    if (this.tokenVerifyCache.size > 256) {
+      const oldest = this.tokenVerifyCache.keys().next().value
+      if (oldest) this.tokenVerifyCache.delete(oldest)
+    }
+    this.tokenVerifyCache.set(token, { payload, expiresAt: now + 2_000 })
     return payload
   }
 
