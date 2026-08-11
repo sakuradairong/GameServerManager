@@ -166,9 +166,9 @@ export function setupRealtime(httpServer: HttpServer) {
       socket.emit(RealtimeEvents.sessionList, terminalService.listSessions())
     })
 
-    socket.on(RealtimeEvents.createPty, (payload: Record<string, unknown> = {}) => {
+    socket.on(RealtimeEvents.createPty, async (payload: Record<string, unknown> = {}) => {
       try {
-        const meta = terminalService.createSession({
+        const meta = await terminalService.createSession({
           sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
           name: typeof payload.name === 'string' ? payload.name : undefined,
           cols: typeof payload.cols === 'number' ? payload.cols : undefined,

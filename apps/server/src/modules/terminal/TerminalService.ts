@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import fs from 'node:fs'
+import fs from 'node:fs/promises'
 import { defaultCwd, spawnPty, type PtyHandle } from '../../adapters/pty/NodePtyAdapter.js'
 
 export interface TerminalSessionMeta {
@@ -55,21 +55,23 @@ export class TerminalService {
     return session ? [...session.sockets] : []
   }
 
-  createSession(input: {
+  async createSession(input: {
     sessionId?: string
     name?: string
     cols?: number
     rows?: number
     cwd?: string
     instanceId?: string
-  }): TerminalSessionMeta {
+  }): Promise<TerminalSessionMeta> {
     const sessionId = input.sessionId || crypto.randomUUID()
     if (this.sessions.has(sessionId)) {
       throw Object.assign(new Error('会话已存在'), { statusCode: 409 })
     }
 
     const cwd = input.cwd || defaultCwd()
-    if (!fs.existsSync(cwd)) {
+    try {
+      await fs.access(cwd)
+    } catch {
       throw Object.assign(new Error(`工作目录不存在: ${cwd}`), { statusCode: 400 })
     }
 
