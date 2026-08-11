@@ -16,6 +16,21 @@ declare module 'socket.io' {
   }
 }
 
+function deployRoom(sessionId: string) {
+  return `deploy:${sessionId}`
+}
+
+function emitToTerminalSockets(
+  io: Server,
+  sessionId: string,
+  event: string,
+  payload: unknown,
+) {
+  for (const socketId of terminalService.getAttachedSocketIds(sessionId)) {
+    io.to(socketId).emit(event, payload)
+  }
+}
+
 export function setupRealtime(httpServer: HttpServer) {
   const corsOrigins = getConfiguredCorsOrigins()
   const io = new Server(httpServer, {
@@ -47,6 +62,7 @@ export function setupRealtime(httpServer: HttpServer) {
   })
 
   let statsTimer: NodeJS.Timeout | null = null
+  let statsInFlight = false
 
   const ensureStatsLoop = () => {
     if (statsTimer) return
@@ -59,32 +75,39 @@ export function setupRealtime(httpServer: HttpServer) {
         }
         return
       }
-      const stats = await systemService.getStatsWithDisk()
-      io.to('system-stats').emit(RealtimeEvents.systemStats, stats)
+      if (statsInFlight) return
+      statsInFlight = true
+      try {
+        const stats = await systemService.getStatsWithDisk()
+        io.to('system-stats').emit(RealtimeEvents.systemStats, stats)
+      } finally {
+        statsInFlight = false
+      }
     }, 2000)
+    statsTimer.unref?.()
   }
 
   terminalService.onOutput((sessionId, data) => {
-    io.emit(RealtimeEvents.terminalOutput, { sessionId, data })
+    emitToTerminalSockets(io, sessionId, RealtimeEvents.terminalOutput, { sessionId, data })
   })
 
   terminalService.onExit((sessionId, exitCode) => {
-    io.emit(RealtimeEvents.terminalExit, { sessionId, exitCode })
-    io.emit(RealtimeEvents.ptyClosed, { sessionId })
+    emitToTerminalSockets(io, sessionId, RealtimeEvents.terminalExit, { sessionId, exitCode })
+    emitToTerminalSockets(io, sessionId, RealtimeEvents.ptyClosed, { sessionId })
     void instanceService.handleTerminalExit(sessionId)
   })
 
   progressBus.onProgress((progress) => {
-    io.emit(RealtimeEvents.deployProgress, progress)
+    io.to(deployRoom(progress.sessionId)).emit(RealtimeEvents.deployProgress, progress)
   })
   progressBus.onLog((log) => {
-    io.emit(RealtimeEvents.deployLog, log)
+    io.to(deployRoom(log.sessionId)).emit(RealtimeEvents.deployLog, log)
   })
   progressBus.onComplete((summary) => {
-    io.emit(RealtimeEvents.deployComplete, summary)
+    io.to(deployRoom(summary.sessionId)).emit(RealtimeEvents.deployComplete, summary)
   })
   progressBus.onError((payload) => {
-    io.emit(RealtimeEvents.deployError, payload)
+    io.to(deployRoom(payload.sessionId)).emit(RealtimeEvents.deployError, payload)
   })
 
   steamcmdInstallBus.onProgress((progress) => {
@@ -99,6 +122,18 @@ export function setupRealtime(httpServer: HttpServer) {
 
   io.on('connection', (socket) => {
     socket.emit(RealtimeEvents.sessionList, terminalService.listSessions())
+
+    socket.on(RealtimeEvents.deployWatch, async (payload: { sessionId?: string }) => {
+      const sessionId = payload?.sessionId
+      if (!sessionId) return
+      await socket.join(deployRoom(sessionId))
+    })
+
+    socket.on(RealtimeEvents.deployUnwatch, async (payload: { sessionId?: string }) => {
+      const sessionId = payload?.sessionId
+      if (!sessionId) return
+      await socket.leave(deployRoom(sessionId))
+    })
 
     socket.on(RealtimeEvents.deployCancel, (payload: { sessionId?: string }) => {
       try {
@@ -147,7 +182,7 @@ export function setupRealtime(httpServer: HttpServer) {
         })
         const buffer = terminalService.attachSocket(meta.sessionId, socket.id)
         socket.emit(RealtimeEvents.ptyCreated, { ...meta, buffer: buffer || '' })
-        io.emit(RealtimeEvents.sessionList, terminalService.listSessions())
+        socket.broadcast.emit(RealtimeEvents.sessionList, terminalService.listSessions())
       } catch (error) {
         socket.emit(RealtimeEvents.terminalError, {
           message: error instanceof Error ? error.message : '创建终端失败',

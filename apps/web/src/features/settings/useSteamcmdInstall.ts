@@ -22,7 +22,9 @@ export function useSteamcmdInstall(options?: {
   const [installing, setInstalling] = useState(false)
 
   const refresh = useCallback(async () => {
-    const next = await apiClient.get<SteamcmdStatus>('/api/v1/steamcmd/status')
+    const next = await apiClient.get<SteamcmdStatus>('/api/v1/steamcmd/status', {
+      cacheTtlMs: 10_000,
+    })
     setStatus(next)
     setInstalling(next.installing)
     setProgress(next.progress ?? 0)
@@ -32,24 +34,15 @@ export function useSteamcmdInstall(options?: {
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const next = await apiClient.get<SteamcmdStatus>('/api/v1/steamcmd/status')
-        if (cancelled) return
-        setStatus(next)
-        setInstalling(next.installing)
-        setProgress(next.progress ?? 0)
-        setStatusMessage(next.statusMessage ?? '')
-      } catch {
-        // ignore initial load errors
-      } finally {
+    void refresh()
+      .catch(() => undefined)
+      .finally(() => {
         if (!cancelled) setLoading(false)
-      }
-    })()
+      })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refresh])
 
   useEffect(() => {
     const socket = getSocket()
@@ -63,6 +56,7 @@ export function useSteamcmdInstall(options?: {
       setInstalling(false)
       setProgress(100)
       setStatusMessage(payload.message)
+      apiClient.invalidateGetCache('/api/v1/steamcmd')
       void refresh().then(() => {
         onInstalledRef.current?.(payload.executablePath)
       })

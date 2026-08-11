@@ -36,6 +36,8 @@ const TEXT_EXTENSIONS = new Set([
 export const FILE_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024
 
 export class FileService {
+  private rootEnsured = false
+
   getRoot(): string {
     return path.resolve(configManager.getConfig().game.defaultInstallPath)
   }
@@ -63,7 +65,9 @@ export class FileService {
   }
 
   async ensureRoot() {
+    if (this.rootEnsured) return
     await fs.mkdir(this.getRoot(), { recursive: true })
+    this.rootEnsured = true
   }
 
   async list(relativePath = ''): Promise<FileListResult> {
@@ -75,13 +79,16 @@ export class FileService {
       throw Object.assign(new Error('目标不是目录'), { statusCode: 400 })
     }
 
-    const names = await fs.readdir(abs)
+    const names = await fs.readdir(abs, { withFileTypes: true })
     const entries: FileEntry[] = []
-    for (const name of names) {
+    for (const dirent of names) {
+      const name = dirent.name
       const full = path.join(abs, name)
       try {
-        await assertNoSymlinkEscape(root, full)
-        const itemStat = await fs.stat(full)
+        if (dirent.isSymbolicLink()) {
+          await assertNoSymlinkEscape(root, full)
+        }
+        const itemStat = await fs.lstat(full)
         entries.push({
           name,
           path: path.relative(root, full).split(path.sep).join('/'),

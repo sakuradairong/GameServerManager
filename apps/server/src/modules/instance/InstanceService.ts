@@ -397,7 +397,9 @@ export class InstanceService {
 
   private async persist() {
     const scheduled = this.persistQueue.catch(() => undefined).then(async () => {
-      await writeJsonAtomic(this.filePath(), { instances: this.list() })
+      await writeJsonAtomic(this.filePath(), { instances: [...this.instances.values()] }, {
+        compact: true,
+      })
     })
     this.persistQueue = scheduled
     await scheduled

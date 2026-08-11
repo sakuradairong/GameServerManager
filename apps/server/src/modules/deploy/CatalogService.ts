@@ -3,7 +3,7 @@ import path from 'node:path'
 import { SteamCatalogSchema, type SteamCatalog, type SteamGameInfo } from '@gsm4/shared'
 import { fetchText } from '../../adapters/download/HttpDownloader.js'
 import { writeJsonAtomic } from '../../lib/atomicJson.js'
-import { resolveDataDir } from '../../lib/paths.js'
+import { configManager } from '../config/ConfigManager.js'
 
 const DEFAULT_CATALOG_URL =
   'https://raw.githubusercontent.com/sakuradairong/GameServerManager/main/server/data/games/installgame.json'
@@ -35,8 +35,10 @@ const SAMPLE_CATALOG: Record<string, SteamGameInfo> = {
 }
 
 export class CatalogService {
-  private async catalogPaths(): Promise<string[]> {
-    const dataDir = await resolveDataDir()
+  private cache: { path: string; mtimeMs: number; catalog: SteamCatalog } | null = null
+
+  private catalogPaths(): string[] {
+    const dataDir = configManager.getDataDir()
     const base = process.cwd()
     return [
       path.join(dataDir, 'games', 'installgame.json'),
@@ -46,7 +48,7 @@ export class CatalogService {
   }
 
   async getCatalogPath(): Promise<string> {
-    for (const candidate of await this.catalogPaths()) {
+    for (const candidate of this.catalogPaths()) {
       try {
         await fs.access(candidate)
         return candidate
@@ -54,7 +56,7 @@ export class CatalogService {
         // continue
       }
     }
-    const dataDir = await resolveDataDir()
+    const dataDir = configManager.getDataDir()
     const target = path.join(dataDir, 'games', 'installgame.json')
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.writeFile(target, JSON.stringify(SAMPLE_CATALOG, null, 2), 'utf8')
@@ -63,6 +65,14 @@ export class CatalogService {
 
   async listGames(): Promise<SteamCatalog> {
     const filePath = await this.getCatalogPath()
+    const stat = await fs.stat(filePath)
+    if (
+      this.cache &&
+      this.cache.path === filePath &&
+      this.cache.mtimeMs === stat.mtimeMs
+    ) {
+      return this.cache.catalog
+    }
     const raw = await fs.readFile(filePath, 'utf8')
     let parsedJson: unknown
     try {
@@ -70,7 +80,9 @@ export class CatalogService {
     } catch {
       throw new Error('本地 Steam 目录不是有效 JSON')
     }
-    return SteamCatalogSchema.parse(parsedJson)
+    const catalog = SteamCatalogSchema.parse(parsedJson)
+    this.cache = { path: filePath, mtimeMs: stat.mtimeMs, catalog }
+    return catalog
   }
 
   async getGame(gameKey: string): Promise<SteamGameInfo | null> {
@@ -102,6 +114,7 @@ export class CatalogService {
     }
     const filePath = await this.getCatalogPath()
     await writeJsonAtomic(filePath, parsed.data)
+    this.cache = null
     return { count: Object.keys(parsed.data).length, path: filePath }
   }
 }
