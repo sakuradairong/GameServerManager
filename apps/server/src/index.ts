@@ -30,7 +30,11 @@ async function main() {
 
   const trustProxy = resolveTrustProxy()
   const app = Fastify({
-    logger: true,
+    logger:
+      process.env.NODE_ENV === 'production'
+        ? { level: process.env.GSM4_LOG_LEVEL || 'warn' }
+        : true,
+    disableRequestLogging: process.env.NODE_ENV === 'production',
     ...(trustProxy !== undefined ? { trustProxy } : {}),
   })
 

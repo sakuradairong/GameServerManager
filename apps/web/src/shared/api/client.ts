@@ -46,6 +46,7 @@ const AUTH_EXPIRED_EVENT = 'gsm4:auth-expired'
 
 export function expireAuth() {
   setToken(null)
+  apiClient.invalidateGetCache()
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
   }
@@ -55,6 +56,36 @@ export function onAuthExpired(listener: () => void) {
   if (typeof window === 'undefined') return () => undefined
   window.addEventListener(AUTH_EXPIRED_EVENT, listener)
   return () => window.removeEventListener(AUTH_EXPIRED_EVENT, listener)
+}
+
+/** 按变更接口失效相关 GET 缓存，避免每次 POST 清空全部缓存。 */
+function invalidateForMutation(path: string) {
+  if (path.startsWith('/api/v1/config')) {
+    apiClient.invalidateGetCache('/api/v1/config')
+    return
+  }
+  if (path.startsWith('/api/v1/plugins')) {
+    apiClient.invalidateGetCache('/api/v1/plugins')
+    return
+  }
+  if (path.startsWith('/api/v1/instances')) {
+    apiClient.invalidateGetCache('/api/v1/instances')
+    return
+  }
+  if (path.startsWith('/api/v1/catalog')) {
+    apiClient.invalidateGetCache('/api/v1/catalog')
+    return
+  }
+  if (path.startsWith('/api/v1/steamcmd')) {
+    apiClient.invalidateGetCache('/api/v1/steamcmd')
+    apiClient.invalidateGetCache('/api/v1/config')
+    return
+  }
+  if (path.startsWith('/api/v1/files')) {
+    apiClient.invalidateGetCache('/api/v1/files')
+    return
+  }
+  // deploy / terminal 等不依赖短 TTL GET 缓存，无需全局清空
 }
 
 class ApiClient {
@@ -122,17 +153,20 @@ class ApiClient {
     const inflight = this.inflightGets.get(path)
     if (inflight) return inflight as Promise<T>
 
-    const promise = this.request<T>(path).then((data) => {
-      this.getCache.set(path, { value: data, expires: Date.now() + ttl })
-      this.inflightGets.delete(path)
-      return data
-    })
+    const promise = this.request<T>(path)
+      .then((data) => {
+        this.getCache.set(path, { value: data, expires: Date.now() + ttl })
+        return data
+      })
+      .finally(() => {
+        this.inflightGets.delete(path)
+      })
     this.inflightGets.set(path, promise)
     return promise
   }
 
   post<T>(path: string, body: unknown = {}) {
-    this.invalidateGetCache('/api/v1/')
+    invalidateForMutation(path)
     return this.request<T>(path, {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
@@ -140,7 +174,7 @@ class ApiClient {
   }
 
   put<T>(path: string, body: unknown = {}) {
-    this.invalidateGetCache('/api/v1/')
+    invalidateForMutation(path)
     return this.request<T>(path, {
       method: 'PUT',
       body: JSON.stringify(body ?? {}),
@@ -148,6 +182,7 @@ class ApiClient {
   }
 
   async upload<T>(path: string, file: File, fields?: Record<string, string>) {
+    invalidateForMutation(path)
     const form = new FormData()
     form.append('file', file)
     if (fields) {
