@@ -73,14 +73,15 @@ function resolveInstanceType(type: DeployRequest['type']): InstanceType {
 export class DeployService {
   private sessions = new Map<string, LiveSession>()
   private reservedInstallPaths = new Set<string>()
+  private lastPruneAt = 0
 
   list(): DeploySessionSummary[] {
-    this.pruneSessions()
+    this.maybePruneSessions()
     return [...this.sessions.values()].map((session) => this.toSummary(session))
   }
 
   get(sessionId: string): DeploySessionSummary | undefined {
-    this.pruneSessions()
+    this.maybePruneSessions()
     const session = this.sessions.get(sessionId)
     return session ? this.toSummary(session) : undefined
   }
@@ -335,7 +336,14 @@ export class DeployService {
     return key
   }
 
+  private maybePruneSessions() {
+    const now = Date.now()
+    if (now - this.lastPruneAt < 60_000) return
+    this.pruneSessions()
+  }
+
   private pruneSessions() {
+    this.lastPruneAt = Date.now()
     const terminal = [...this.sessions.values()]
       .filter((session) => isTerminalStatus(session.status))
       .sort((first, second) => first.updatedAt.localeCompare(second.updatedAt))

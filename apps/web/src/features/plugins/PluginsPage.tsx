@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, memo } from 'react'
 import type { PluginInfo, PluginListResult } from '@gsm4/shared'
 import { useAuth } from '../../shared/api/AuthContext'
 import { apiClient, ApiError } from '../../shared/api/client'
@@ -17,7 +17,7 @@ function toggleLabel(plugin: PluginInfo, busyName: string | null): string {
   return plugin.enabled ? '禁用' : '启用'
 }
 
-function PluginCard({
+const PluginCard = memo(function PluginCard({
   plugin,
   isAdmin,
   busyName,
@@ -87,7 +87,7 @@ function PluginCard({
       </div>
     </article>
   )
-}
+})
 
 export function PluginsPage() {
   const { user } = useAuth()
@@ -148,21 +148,24 @@ export function PluginsPage() {
     }
   }
 
-  async function setEnabled(plugin: PluginInfo) {
-    setBusyName(plugin.name)
-    try {
-      await apiClient.request<PluginInfo>(`/api/v1/plugins/${encodeURIComponent(plugin.name)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ enabled: !plugin.enabled }),
-      })
-      push(`插件已${plugin.enabled ? '禁用' : '启用'}`, 'success')
-      await loadPlugins()
-    } catch (error) {
-      push(error instanceof ApiError ? error.message : '更新插件状态失败', 'error')
-    } finally {
-      setBusyName(null)
-    }
-  }
+  const setEnabled = useCallback(
+    async (plugin: PluginInfo) => {
+      setBusyName(plugin.name)
+      try {
+        await apiClient.request<PluginInfo>(`/api/v1/plugins/${encodeURIComponent(plugin.name)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: !plugin.enabled }),
+        })
+        push(`插件已${plugin.enabled ? '禁用' : '启用'}`, 'success')
+        await loadPlugins()
+      } catch (error) {
+        push(error instanceof ApiError ? error.message : '更新插件状态失败', 'error')
+      } finally {
+        setBusyName(null)
+      }
+    },
+    [loadPlugins, push],
+  )
 
   async function uninstall(plugin: PluginInfo) {
     setBusyName(plugin.name)
@@ -179,12 +182,23 @@ export function PluginsPage() {
     }
   }
 
-  function openPlugin(plugin: PluginInfo) {
+  const openPlugin = useCallback((plugin: PluginInfo) => {
     if (!plugin.enabled || !plugin.webAvailable) return
     setChannel(createChannel())
     setActivePlugin(plugin)
     setPluginDialogOpen(true)
-  }
+  }, [])
+
+  const requestDelete = useCallback((plugin: PluginInfo) => {
+    setPendingDelete(plugin)
+  }, [])
+
+  const togglePlugin = useCallback(
+    (target: PluginInfo) => {
+      void setEnabled(target)
+    },
+    [setEnabled],
+  )
 
   return (
     <div className="stack">
@@ -268,8 +282,8 @@ export function PluginsPage() {
                 isAdmin={isAdmin}
                 busyName={busyName}
                 onOpen={openPlugin}
-                onToggle={(target) => void setEnabled(target)}
-                onDelete={setPendingDelete}
+                onToggle={togglePlugin}
+                onDelete={requestDelete}
               />
             ))}
           </div>

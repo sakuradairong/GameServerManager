@@ -295,9 +295,9 @@ export class InstanceService {
       await this.assertDirectory(instance.workingDirectory)
       instance.status = 'starting'
       instance.errorMessage = undefined
-      await this.persist()
+      // 不立即落盘 starting，等会话创建成功后一次写 running
 
-      const session = terminalService.createSession({
+      const session = await terminalService.createSession({
         name: `实例 · ${instance.name}`,
         cwd: instance.workingDirectory,
         instanceId: instance.id,
@@ -338,7 +338,6 @@ export class InstanceService {
 
     try {
       instance.status = 'stopping'
-      await this.persist()
 
       const sessionId = instance.terminalSessionId
       if (sessionId && terminalService.getSession(sessionId)) {

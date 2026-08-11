@@ -81,23 +81,32 @@ export class FileService {
 
     const names = await fs.readdir(abs, { withFileTypes: true })
     const entries: FileEntry[] = []
-    for (const dirent of names) {
-      const name = dirent.name
-      const full = path.join(abs, name)
-      try {
-        if (dirent.isSymbolicLink()) {
-          await assertNoSymlinkEscape(root, full)
-        }
-        const itemStat = await fs.lstat(full)
-        entries.push({
-          name,
-          path: path.relative(root, full).split(path.sep).join('/'),
-          isDirectory: itemStat.isDirectory(),
-          size: itemStat.isFile() ? itemStat.size : undefined,
-          modifiedAt: itemStat.mtime.toISOString(),
-        })
-      } catch {
-        // skip inaccessible
+    const CONCURRENCY = 32
+    for (let i = 0; i < names.length; i += CONCURRENCY) {
+      const chunk = names.slice(i, i + CONCURRENCY)
+      const chunkEntries = await Promise.all(
+        chunk.map(async (dirent) => {
+          const name = dirent.name
+          const full = path.join(abs, name)
+          try {
+            if (dirent.isSymbolicLink()) {
+              await assertNoSymlinkEscape(root, full)
+            }
+            const itemStat = await fs.lstat(full)
+            return {
+              name,
+              path: path.relative(root, full).split(path.sep).join('/'),
+              isDirectory: itemStat.isDirectory(),
+              size: itemStat.isFile() ? itemStat.size : undefined,
+              modifiedAt: itemStat.mtime.toISOString(),
+            } satisfies FileEntry
+          } catch {
+            return null
+          }
+        }),
+      )
+      for (const entry of chunkEntries) {
+        if (entry) entries.push(entry)
       }
     }
 
