@@ -53,6 +53,7 @@ npm run dev
   - `GSM4_DATA_DIR`
   - `GSM4_DEFAULT_INSTALL_PATH`
   - `GSM4_CORS_ORIGINS`（逗号分隔的额外可信前端 Origin）
+  - `GSM4_TRUST_PROXY`（反向代理后启用：`true` / 跳数如 `1` / 逗号分隔信任地址；勿设为字面量 `undefined`）
   - `GSM4_STEAM_CATALOG_URL`（必须为 HTTPS）
   - `GSM4_ALLOW_PRIVATE_DOWNLOADS=1`（仅在明确需要下载内网资源时启用）
   - `GSM4_MAX_EXTRACTED_BYTES`（单次归档解压上限，默认 64 GiB）

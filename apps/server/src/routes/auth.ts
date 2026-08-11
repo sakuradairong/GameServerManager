@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import { LoginBodySchema, RegisterBodySchema } from '@gsm4/shared'
 import { authService } from '../modules/auth/AuthService.js'
 import { loginAttemptLimiter } from '../modules/auth/LoginAttemptLimiter.js'
+import { resolveClientIp } from '../lib/clientIp.js'
 import { requireAuth } from '../plugins/auth.js'
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
@@ -51,7 +52,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       })
     }
 
-    const attemptKey = `${request.ip}:${parsed.data.username.trim().toLowerCase()}`
+    const attemptKey = `${resolveClientIp(request)}:${parsed.data.username.trim().toLowerCase()}`
     try {
       loginAttemptLimiter.assertAllowed(attemptKey)
       const result = await authService.login(parsed.data)

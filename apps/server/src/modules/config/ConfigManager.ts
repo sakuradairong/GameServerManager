@@ -165,11 +165,17 @@ export class ConfigManager {
       throw new Error('data/config.json 损坏，已拒绝使用默认配置覆盖', { cause: error })
     }
 
+    const serverHost = parsed.server?.host?.trim()
+    const normalizedServer =
+      serverHost && serverHost !== 'undefined' && serverHost !== 'null'
+        ? { ...defaults.server, ...parsed.server, host: serverHost }
+        : { ...defaults.server, ...parsed.server, host: defaults.server.host }
+
     return {
       ...defaults,
       ...parsed,
       jwt: { ...defaults.jwt, ...parsed.jwt },
-      server: { ...defaults.server, ...parsed.server },
+      server: normalizedServer,
       game: { ...defaults.game, ...parsed.game },
       steamcmd: { ...defaults.steamcmd, ...parsed.steamcmd },
       security: { ...defaults.security, ...parsed.security },
