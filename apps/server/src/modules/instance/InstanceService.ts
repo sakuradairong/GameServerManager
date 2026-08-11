@@ -150,6 +150,26 @@ export class InstanceService {
     return this.locks.has(id)
   }
 
+  /**
+   * 获取维护锁（备份/恢复等）。调用方必须在 finally 中 releaseLock。
+   * 要求实例已停止且未被其它操作锁定。
+   */
+  acquireLock(id: string): Instance {
+    const instance = this.require(id)
+    if (this.locks.has(id)) {
+      throw Object.assign(new Error('实例正在执行其它操作'), { statusCode: 409 })
+    }
+    if (instance.status === 'running' || instance.status === 'starting') {
+      throw Object.assign(new Error('请先停止实例'), { statusCode: 409 })
+    }
+    this.locks.add(id)
+    return instance
+  }
+
+  releaseLock(id: string) {
+    this.locks.delete(id)
+  }
+
   /** 开始一次 Steam 更新/分支切换：校验为 Steam 实例且空闲，加锁。 */
   beginSteamUpdate(id: string): Instance {
     const instance = this.require(id)

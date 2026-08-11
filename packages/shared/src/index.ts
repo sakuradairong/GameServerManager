@@ -6,6 +6,7 @@ export * from './settings.js'
 export * from './files.js'
 export * from './steamcmd.js'
 export * from './plugin.js'
+export * from './backup.js'
 
 import { z } from 'zod'
 

@@ -103,6 +103,11 @@ class ApiClient {
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const method = (init.method || 'GET').toUpperCase()
+    if (method !== 'GET' && method !== 'HEAD') {
+      invalidateForMutation(path)
+    }
+
     const headers = new Headers(init.headers || {})
     if (!headers.has('Content-Type') && init.body) {
       headers.set('Content-Type', 'application/json')
@@ -166,7 +171,6 @@ class ApiClient {
   }
 
   post<T>(path: string, body: unknown = {}) {
-    invalidateForMutation(path)
     return this.request<T>(path, {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
@@ -174,7 +178,6 @@ class ApiClient {
   }
 
   put<T>(path: string, body: unknown = {}) {
-    invalidateForMutation(path)
     return this.request<T>(path, {
       method: 'PUT',
       body: JSON.stringify(body ?? {}),
