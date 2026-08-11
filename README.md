@@ -36,8 +36,8 @@ npm run dev
 | 首页 | CPU / 内存 / 磁盘 / Load 实时监控 |
 | 终端 | 多会话 PTY |
 | 实例 | CRUD、启停重启、操作锁 |
-| 游戏部署 | DeploySession：SteamCMD / Minecraft / 归档 / 基岩版 / tModLoader / Modrinth / Factorio（能力表驱动） |
-| Steam 更新 | 已部署 Steam 实例可更新或切换分支，复用 DeploySession 实时进度 |
+| 游戏部署 | DeploySession：SteamCMD（可查询/选择分支）/ Minecraft / 归档 / 基岩版 / tModLoader / Modrinth / Factorio（能力表驱动） |
+| Steam 更新 | 已部署 Steam 实例可查询可见分支并更新或切换，支持账号登录与 beta 分支密码，复用 DeploySession 实时进度 |
 | 文件 | 默认安装目录浏览、编辑、上传、删除 |
 | 设置 | 默认安装路径、SteamCMD 一键安装/路径 |
 | 关于 | 版本与启动说明 |

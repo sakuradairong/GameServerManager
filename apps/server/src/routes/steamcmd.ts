@@ -1,5 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify'
-import { SteamcmdDetectBodySchema, SteamcmdInstallBodySchema } from '@gsm4/shared'
+import {
+  SteamAppIdSchema,
+  SteamBranchQueryBodySchema,
+  SteamcmdDetectBodySchema,
+  SteamcmdInstallBodySchema,
+} from '@gsm4/shared'
 import { requireAuth } from '../plugins/auth.js'
 import { steamCMDManager } from '../modules/steamcmd/SteamCMDManager.js'
 
@@ -71,4 +76,40 @@ export const steamcmdRoutes: FastifyPluginAsync = async (app) => {
       })
     }
   })
+
+  app.post(
+    '/api/v1/steamcmd/apps/:appId/branches',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { appId } = request.params as { appId: string }
+      const parsedAppId = SteamAppIdSchema.safeParse(appId)
+      const parsedBody = SteamBranchQueryBodySchema.safeParse(request.body ?? {})
+      if (!parsedAppId.success || !parsedBody.success) {
+        return reply.code(400).send({
+          success: false,
+          error: 'VALIDATION_ERROR',
+          message: 'Steam 分支查询参数无效',
+          details: {
+            appId: parsedAppId.success ? undefined : parsedAppId.error.flatten(),
+            body: parsedBody.success ? undefined : parsedBody.error.flatten(),
+          },
+        })
+      }
+
+      try {
+        const branches = await steamCMDManager.getAppBranches(
+          parsedAppId.data,
+          parsedBody.data,
+        )
+        return { success: true, data: branches }
+      } catch (error) {
+        const err = error as Error & { statusCode?: number }
+        return reply.code(err.statusCode ?? 500).send({
+          success: false,
+          error: 'STEAM_BRANCH_QUERY_FAILED',
+          message: err.message || 'Steam 分支查询失败',
+        })
+      }
+    },
+  )
 }

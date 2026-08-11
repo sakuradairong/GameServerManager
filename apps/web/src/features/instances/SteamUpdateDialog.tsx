@@ -4,6 +4,11 @@ import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
 import { useDeploySession } from '../deploy/hooks/useDeploySession'
 import { DeployConsole } from '../deploy/components/DeployConsole'
+import {
+  SteamBranchPicker,
+  type SteamBranchSelection,
+  type SteamLoginValue,
+} from '../steam/SteamBranchPicker'
 
 export function SteamUpdateDialog({
   instance,
@@ -21,16 +26,26 @@ export function SteamUpdateDialog({
   const { push } = useToast()
   const deploy = useDeploySession()
   const currentBranch = instance.steam?.branch || 'public'
-  const [branch, setBranch] = useState(currentBranch)
-  const [betaPassword, setBetaPassword] = useState('')
-  const [anonymous, setAnonymous] = useState(true)
-  const [steamUsername, setSteamUsername] = useState('')
-  const [steamPassword, setSteamPassword] = useState('')
+  const [branchSelection, setBranchSelection] = useState<SteamBranchSelection>({
+    branch: currentBranch,
+    betaPassword: '',
+  })
+  const [login, setLogin] = useState<SteamLoginValue>({
+    anonymous: true,
+    steamUsername: '',
+    steamPassword: '',
+  })
   const [submitting, setSubmitting] = useState(false)
 
   const status = deploy.session?.status
   const sessionId = deploy.session?.sessionId
   const running = status === 'queued' || status === 'running' || status === 'cancelling'
+
+  useEffect(() => {
+    if (!open || running) return
+    setBranchSelection({ branch: currentBranch, betaPassword: '' })
+    setLogin({ anonymous: true, steamUsername: '', steamPassword: '' })
+  }, [currentBranch, instance.id, open, running])
 
   // 每个会话只处理一次完成事件，避免父级回调标识变化导致的重复提示/刷新
   const handledSessionRef = useRef<string | null>(null)
@@ -44,13 +59,24 @@ export function SteamUpdateDialog({
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
+    if (!login.anonymous && (!login.steamUsername.trim() || !login.steamPassword)) {
+      push('非匿名登录需要填写 Steam 账号和密码', 'error')
+      return
+    }
     setSubmitting(true)
     try {
       const body: SteamUpdateBody = {
-        branch: branch.trim() || 'public',
-        ...(betaPassword ? { betaPassword } : {}),
-        anonymous,
-        ...(anonymous ? {} : { steamUsername, steamPassword }),
+        branch: branchSelection.branch.trim() || 'public',
+        ...(branchSelection.betaPassword
+          ? { betaPassword: branchSelection.betaPassword }
+          : {}),
+        anonymous: login.anonymous,
+        ...(login.anonymous
+          ? {}
+          : {
+              steamUsername: login.steamUsername.trim(),
+              steamPassword: login.steamPassword,
+            }),
       }
       const session = await apiClient.post<DeploySessionSummary>(
         `/api/v1/instances/${instance.id}/steam/update`,
@@ -61,13 +87,16 @@ export function SteamUpdateDialog({
     } catch (error) {
       push(error instanceof ApiError ? error.message : '更新失败', 'error')
     } finally {
-      setBetaPassword('')
-      setSteamPassword('')
+      setBranchSelection((current) => ({ ...current, betaPassword: '' }))
+      setLogin((current) => ({ ...current, steamPassword: '' }))
       setSubmitting(false)
     }
   }
 
-  const branchChanged = branch.trim() !== currentBranch
+  const targetBranch = branchSelection.branch.trim() || 'public'
+  const branchChanged = targetBranch !== currentBranch
+  const loginReady =
+    login.anonymous || Boolean(login.steamUsername.trim() && login.steamPassword)
 
   return (
     <div
@@ -91,59 +120,42 @@ export function SteamUpdateDialog({
         </p>
 
         <form onSubmit={onSubmit}>
-          <div className="form-grid">
-            <label className="field">
-              <span>目标分支</span>
-              <input
-                autoComplete="off"
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
-                placeholder="public"
-              />
-              <span className="muted" style={{ marginTop: 6 }}>
-                {branchChanged ? `将从 ${currentBranch} 切换到 ${branch.trim() || 'public'}` : '保持当前分支进行更新'}
-              </span>
-            </label>
-            <label className="field">
-              <span>分支密码（可选）</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={betaPassword}
-                onChange={(e) => setBetaPassword(e.target.value)}
-                placeholder="私有 beta 分支需要"
-              />
-            </label>
-          </div>
-
           <label
             className="field"
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
           >
             <input
               type="checkbox"
-              checked={anonymous}
+              checked={login.anonymous}
               onChange={(e) => {
-                const checked = e.target.checked
-                setAnonymous(checked)
-                if (checked) {
-                  setSteamUsername('')
-                  setSteamPassword('')
-                }
+                const anonymous = e.target.checked
+                setLogin((current) => ({
+                  anonymous,
+                  steamUsername: anonymous ? '' : current.steamUsername,
+                  steamPassword: anonymous ? '' : current.steamPassword,
+                }))
               }}
               style={{ width: 'auto' }}
+              disabled={running || submitting}
             />
             <span>匿名登录（免费专用服务端）</span>
           </label>
 
-          {!anonymous && (
+          {!login.anonymous && (
             <div className="form-grid" style={{ marginTop: 8 }}>
               <label className="field">
                 <span>Steam 账号</span>
                 <input
                   autoComplete="off"
-                  value={steamUsername}
-                  onChange={(e) => setSteamUsername(e.target.value)}
+                  value={login.steamUsername}
+                  onChange={(e) =>
+                    setLogin((current) => ({
+                      ...current,
+                      steamUsername: e.target.value,
+                    }))
+                  }
+                  required
+                  disabled={running || submitting}
                 />
               </label>
               <label className="field">
@@ -151,12 +163,34 @@ export function SteamUpdateDialog({
                 <input
                   type="password"
                   autoComplete="new-password"
-                  value={steamPassword}
-                  onChange={(e) => setSteamPassword(e.target.value)}
+                  value={login.steamPassword}
+                  onChange={(e) =>
+                    setLogin((current) => ({
+                      ...current,
+                      steamPassword: e.target.value,
+                    }))
+                  }
+                  required
+                  disabled={running || submitting}
                 />
               </label>
             </div>
           )}
+
+          <SteamBranchPicker
+            id={`steam-update-branch-${instance.id}`}
+            appId={instance.steam?.appId || ''}
+            value={branchSelection}
+            login={login}
+            disabled={running || submitting}
+            onChange={setBranchSelection}
+          />
+
+          <span className="muted" style={{ display: 'block', marginTop: 8 }}>
+            {branchChanged
+              ? `将从 ${currentBranch} 切换到 ${targetBranch}`
+              : '保持当前分支进行更新'}
+          </span>
 
           <div className="row-actions" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
             <button
@@ -176,7 +210,7 @@ export function SteamUpdateDialog({
                 取消更新
               </button>
             ) : (
-              <button className="btn" type="submit" disabled={submitting}>
+              <button className="btn" type="submit" disabled={submitting || !loginReady}>
                 {submitting ? '提交中…' : branchChanged ? '切换分支并更新' : '开始更新'}
               </button>
             )}

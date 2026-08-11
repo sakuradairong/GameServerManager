@@ -1,5 +1,58 @@
 import { z } from 'zod'
 
+export const SteamAppIdSchema = z
+  .string()
+  .trim()
+  .regex(/^\d+$/u, 'AppID 必须是数字')
+  .refine((value) => value.length <= 10 && Number(value) <= 0xffffffff, {
+    message: 'AppID 超出有效范围',
+  })
+
+export const SteamCommandTextSchema = z
+  .string()
+  .max(256)
+  .refine((value) => !/[\x00-\x1f\x7f]/u.test(value), {
+    message: '不能包含控制字符',
+  })
+
+export const SteamBranchNameSchema = z
+  .string()
+  .trim()
+  .min(1, '分支名不能为空')
+  .max(128)
+  .refine((value) => !/[\x00-\x1f\x7f]/u.test(value), {
+    message: '分支名包含无效控制字符',
+  })
+
+export const SteamBranchInfoSchema = z.object({
+  name: SteamBranchNameSchema,
+  description: z.string().optional(),
+  buildId: z.string().optional(),
+  updatedAt: z.string().datetime().optional(),
+  requiresPassword: z.boolean(),
+  isDefault: z.boolean(),
+})
+export type SteamBranchInfo = z.infer<typeof SteamBranchInfoSchema>
+
+export const SteamBranchQueryBodySchema = z
+  .object({
+    forceRefresh: z.boolean().optional(),
+    steamUsername: SteamCommandTextSchema.optional(),
+    steamPassword: SteamCommandTextSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    const username = value.steamUsername?.trim() || ''
+    const password = value.steamPassword || ''
+    if (Boolean(username) !== Boolean(password)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: username ? ['steamPassword'] : ['steamUsername'],
+        message: 'Steam 账号和密码必须同时填写',
+      })
+    }
+  })
+export type SteamBranchQueryBody = z.infer<typeof SteamBranchQueryBodySchema>
+
 export const SteamcmdStatusSchema = z.object({
   isInstalled: z.boolean(),
   executablePath: z.string().nullable(),

@@ -5,6 +5,11 @@ import { useToast } from '../../../shared/ui/Toast'
 import { useDeploySession } from '../hooks/useDeploySession'
 import { DeployConsole } from '../components/DeployConsole'
 import { SteamcmdInstallCard } from '../../settings/SteamcmdInstallCard'
+import {
+  SteamBranchPicker,
+  type SteamBranchSelection,
+  type SteamLoginValue,
+} from '../../steam/SteamBranchPicker'
 
 export function SteamDeployPanel() {
   const { push } = useToast()
@@ -12,6 +17,15 @@ export function SteamDeployPanel() {
   const [games, setGames] = useState<Record<string, SteamGameInfo>>({})
   const [gameKey, setGameKey] = useState('')
   const [instanceName, setInstanceName] = useState('')
+  const [branchSelection, setBranchSelection] = useState<SteamBranchSelection>({
+    branch: 'public',
+    betaPassword: '',
+  })
+  const [login, setLogin] = useState<SteamLoginValue>({
+    anonymous: true,
+    steamUsername: '',
+    steamPassword: '',
+  })
   const [steamConfigured, setSteamConfigured] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -30,6 +44,10 @@ export function SteamDeployPanel() {
         if (first) {
           setGameKey(first)
           setInstanceName(catalog[first].game_nameCN || first)
+          setLogin((current) => ({
+            ...current,
+            anonymous: catalog[first].login_anonymous !== false,
+          }))
         }
       } catch (error) {
         if (!cancelled) {
@@ -52,18 +70,34 @@ export function SteamDeployPanel() {
       push('请选择有效游戏', 'error')
       return
     }
+    if (!login.anonymous && (!login.steamUsername.trim() || !login.steamPassword)) {
+      push('非匿名登录需要填写 Steam 账号和密码', 'error')
+      return
+    }
     try {
       await deploy.start({
         type: 'steamcmd',
         gameKey,
         appId: String(info.appid),
         instanceName: instanceName || info.game_nameCN || gameKey,
-        anonymous: info.login_anonymous !== false,
-        branch: 'public',
+        anonymous: login.anonymous,
+        branch: branchSelection.branch.trim() || 'public',
+        ...(branchSelection.betaPassword
+          ? { betaPassword: branchSelection.betaPassword }
+          : {}),
+        ...(login.anonymous
+          ? {}
+          : {
+              steamUsername: login.steamUsername.trim(),
+              steamPassword: login.steamPassword,
+            }),
       })
       push('Steam 部署已开始', 'success')
     } catch (error) {
       push(error instanceof ApiError ? error.message : '启动失败', 'error')
+    } finally {
+      setBranchSelection((current) => ({ ...current, betaPassword: '' }))
+      setLogin((current) => ({ ...current, steamPassword: '' }))
     }
   }
 
@@ -91,7 +125,18 @@ export function SteamDeployPanel() {
             <span>游戏</span>
             <select
               value={gameKey}
-              onChange={(e) => setGameKey(e.target.value)}
+              onChange={(e) => {
+                const nextKey = e.target.value
+                const nextGame = games[nextKey]
+                setGameKey(nextKey)
+                setInstanceName(nextGame?.game_nameCN || nextKey)
+                setBranchSelection({ branch: 'public', betaPassword: '' })
+                setLogin({
+                  anonymous: nextGame?.login_anonymous !== false,
+                  steamUsername: '',
+                  steamPassword: '',
+                })
+              }}
               required
               disabled={loading}
             >
@@ -112,8 +157,79 @@ export function SteamDeployPanel() {
             />
           </label>
         </div>
+
+        <label
+          className="field"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
+        >
+          <input
+            type="checkbox"
+            checked={login.anonymous}
+            onChange={(event) => {
+              const anonymous = event.target.checked
+              setLogin((current) => ({
+                anonymous,
+                steamUsername: anonymous ? '' : current.steamUsername,
+                steamPassword: anonymous ? '' : current.steamPassword,
+              }))
+            }}
+            style={{ width: 'auto' }}
+            disabled={loading || deploy.submitting}
+          />
+          <span>匿名登录（免费专用服务端）</span>
+        </label>
+
+        {!login.anonymous && (
+          <div className="form-grid" style={{ marginTop: 8 }}>
+            <label className="field">
+              <span>Steam 账号</span>
+              <input
+                autoComplete="off"
+                value={login.steamUsername}
+                onChange={(event) =>
+                  setLogin((current) => ({
+                    ...current,
+                    steamUsername: event.target.value,
+                  }))
+                }
+                required
+                disabled={loading || deploy.submitting}
+              />
+            </label>
+            <label className="field">
+              <span>Steam 密码</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={login.steamPassword}
+                onChange={(event) =>
+                  setLogin((current) => ({
+                    ...current,
+                    steamPassword: event.target.value,
+                  }))
+                }
+                required
+                disabled={loading || deploy.submitting}
+              />
+            </label>
+          </div>
+        )}
+
+        <SteamBranchPicker
+          id="steam-deploy-branch"
+          appId={games[gameKey]?.appid ? String(games[gameKey].appid) : ''}
+          value={branchSelection}
+          login={login}
+          disabled={loading || deploy.submitting || steamConfigured === false}
+          onChange={setBranchSelection}
+        />
+
         <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="btn" type="submit" disabled={deploy.submitting || loading}>
+          <button
+            className="btn"
+            type="submit"
+            disabled={deploy.submitting || loading || steamConfigured === false}
+          >
             {deploy.submitting ? '提交中…' : '开始部署'}
           </button>
           <button

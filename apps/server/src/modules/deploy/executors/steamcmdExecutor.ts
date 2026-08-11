@@ -47,7 +47,9 @@ export const steamcmdExecutor: DeployExecutor = {
         }`
 
     const branch =
-      request.branch && request.branch !== 'public' ? ` -beta ${request.branch}` : ''
+      request.branch && request.branch !== 'public'
+        ? ` -beta ${quoteArg(request.branch)}`
+        : ''
     const betaPassword =
       branch && request.betaPassword ? ` -betapassword ${quoteArg(request.betaPassword)}` : ''
     const script = [

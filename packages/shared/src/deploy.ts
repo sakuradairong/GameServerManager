@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SteamBranchNameSchema, SteamCommandTextSchema } from './steamcmd.js'
 
 export const DeployTypeSchema = z.enum([
   'steamcmd',
@@ -79,37 +80,59 @@ export const MrpackLoaderSchema = z.enum(['fabric', 'quilt', 'forge', 'neoforge'
 export type MrpackLoader = z.infer<typeof MrpackLoaderSchema>
 
 const UploadIdSchema = z.string().uuid()
-const SteamScriptTextSchema = z
-  .string()
-  .max(256)
-  .refine((value) => !/[\r\n]/u.test(value), { message: '不能包含换行符' })
+const SteamUsernameSchema = SteamCommandTextSchema.transform((value) => value.trim())
 
-export const SteamDeployRequestSchema = z.object({
-  type: z.literal('steamcmd'),
-  gameKey: z.string().min(1),
-  appId: z.string().regex(/^\d+$/u, 'appId 必须是数字'),
-  instanceName: z.string().min(1).max(128),
-  installName: z.string().min(1).max(128).optional(),
-  customInstallPath: z.string().optional(),
-  allowCustomPath: z.boolean().optional(),
-  branch: z.string().max(128).regex(/^[A-Za-z0-9._-]+$/u, '分支名格式无效').optional(),
-  betaPassword: SteamScriptTextSchema.optional(),
-  anonymous: z.boolean().optional(),
-  steamUsername: SteamScriptTextSchema.optional(),
-  steamPassword: SteamScriptTextSchema.optional(),
-  startCommand: z.string().optional(),
-})
+function validateSteamCredentials(
+  value: { anonymous?: boolean; steamUsername?: string; steamPassword?: string },
+  ctx: z.RefinementCtx,
+) {
+  if (value.anonymous !== false) return
+  if (!value.steamUsername?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['steamUsername'],
+      message: '非匿名登录必须填写 Steam 账号',
+    })
+  }
+  if (!value.steamPassword) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['steamPassword'],
+      message: '非匿名登录必须填写 Steam 密码',
+    })
+  }
+}
+
+export const SteamDeployRequestSchema = z
+  .object({
+    type: z.literal('steamcmd'),
+    gameKey: z.string().min(1),
+    appId: z.string().regex(/^\d+$/u, 'appId 必须是数字'),
+    instanceName: z.string().min(1).max(128),
+    installName: z.string().min(1).max(128).optional(),
+    customInstallPath: z.string().optional(),
+    allowCustomPath: z.boolean().optional(),
+    branch: SteamBranchNameSchema.optional(),
+    betaPassword: SteamCommandTextSchema.optional(),
+    anonymous: z.boolean().optional(),
+    steamUsername: SteamUsernameSchema.optional(),
+    steamPassword: SteamCommandTextSchema.optional(),
+    startCommand: z.string().optional(),
+  })
+  .superRefine(validateSteamCredentials)
 export type SteamDeployRequest = z.infer<typeof SteamDeployRequestSchema>
 
 /** 对已存在的 Steam 实例执行更新 / 分支切换（复用 steamcmd 执行器与 deploy:* 进度） */
-export const SteamUpdateBodySchema = z.object({
-  /** 目标分支；缺省时沿用实例当前分支或 public */
-  branch: z.string().max(128).regex(/^[A-Za-z0-9._-]+$/u, '分支名格式无效').optional(),
-  betaPassword: SteamScriptTextSchema.optional(),
-  anonymous: z.boolean().optional(),
-  steamUsername: SteamScriptTextSchema.optional(),
-  steamPassword: SteamScriptTextSchema.optional(),
-})
+export const SteamUpdateBodySchema = z
+  .object({
+    /** 目标分支；缺省时沿用实例当前分支或 public */
+    branch: SteamBranchNameSchema.optional(),
+    betaPassword: SteamCommandTextSchema.optional(),
+    anonymous: z.boolean().optional(),
+    steamUsername: SteamUsernameSchema.optional(),
+    steamPassword: SteamCommandTextSchema.optional(),
+  })
+  .superRefine(validateSteamCredentials)
 export type SteamUpdateBody = z.infer<typeof SteamUpdateBodySchema>
 
 export const MinecraftDeployRequestSchema = z

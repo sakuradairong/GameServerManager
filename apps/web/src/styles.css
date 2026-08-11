@@ -695,6 +695,37 @@ input {
   background: #0d131b;
 }
 
+.steam-branch-picker {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(15, 20, 25, 0.45);
+}
+
+.steam-branch-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.steam-branch-input {
+  min-width: 0;
+}
+
+.steam-branch-query-button {
+  min-width: 104px;
+}
+
+.steam-branch-status {
+  display: block;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
 .about-list {
   margin: 16px 0 0;
   padding-left: 18px;
@@ -738,5 +769,13 @@ input {
 
   .plugin-issue-row {
     grid-template-columns: 1fr;
+  }
+
+  .steam-branch-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .steam-branch-query-button {
+    width: 100%;
   }
 }

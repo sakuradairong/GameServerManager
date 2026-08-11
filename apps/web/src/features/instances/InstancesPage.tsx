@@ -29,6 +29,9 @@ export function InstancesPage() {
   const refresh = useCallback(async () => {
     const data = await apiClient.get<Instance[]>('/api/v1/instances')
     setInstances(data)
+    setSteamUpdateInstance((current) =>
+      current ? data.find((instance) => instance.id === current.id) || current : null,
+    )
   }, [])
 
   useEffect(() => {
