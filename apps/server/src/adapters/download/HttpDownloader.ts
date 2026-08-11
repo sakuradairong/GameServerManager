@@ -210,6 +210,8 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
   const totalHeader = response.headers['content-length']
   const total = totalHeader ? Number(totalHeader) : undefined
   let transferred = 0
+  let lastProgressEmit = 0
+  let lastPercent: number | undefined
 
   const tmp = `${options.destination}.part`
   const file = fs.createWriteStream(tmp)
@@ -217,6 +219,16 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
   response.on('data', (chunk: Buffer) => {
     transferred += chunk.length
     const percent = total ? Math.min(99, Math.round((transferred / total) * 100)) : undefined
+    const now = Date.now()
+    if (
+      now - lastProgressEmit < 250 &&
+      percent != null &&
+      percent === lastPercent
+    ) {
+      return
+    }
+    lastProgressEmit = now
+    lastPercent = percent
     options.onProgress?.(percent, transferred, total)
   })
 
