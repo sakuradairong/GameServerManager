@@ -17,6 +17,7 @@ interface LiveSession extends TerminalSessionMeta {
   pty: PtyHandle
   outputBuffer: string
   sockets: Set<string>
+  exited: boolean
 }
 
 const MAX_BUFFER = 200_000
@@ -83,6 +84,7 @@ export class TerminalService {
       pty,
       outputBuffer: '',
       sockets: new Set(),
+      exited: false,
     }
 
     pty.onData((data) => {
@@ -96,10 +98,7 @@ export class TerminalService {
     })
 
     pty.onExit((exitCode) => {
-      this.sessions.delete(sessionId)
-      for (const listener of this.exitListeners) {
-        listener(sessionId, exitCode)
-      }
+      this.finalizeExit(session, exitCode)
     })
 
     this.sessions.set(sessionId, session)
@@ -141,11 +140,19 @@ export class TerminalService {
     session.pty.resize(cols, rows)
   }
 
-  close(sessionId: string) {
+  close(sessionId: string, force = false) {
     const session = this.sessions.get(sessionId)
     if (!session) return
-    session.pty.kill()
-    this.sessions.delete(sessionId)
+    session.pty.kill(force ? 'SIGKILL' : undefined)
+  }
+
+  private finalizeExit(session: LiveSession, exitCode: number) {
+    if (session.exited) return
+    session.exited = true
+    this.sessions.delete(session.sessionId)
+    for (const listener of this.exitListeners) {
+      listener(session.sessionId, exitCode)
+    }
   }
 
   private toMeta(session: LiveSession): TerminalSessionMeta {

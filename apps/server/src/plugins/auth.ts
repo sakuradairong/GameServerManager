@@ -30,7 +30,7 @@ export async function authenticateToken(
       })
       return
     }
-    request.authUser = authService.verifyToken(token)
+    request.authUser = await authService.verifyToken(token)
   } catch {
     await reply.code(401).send({
       success: false,
@@ -45,5 +45,20 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   await authenticateToken(request, reply)
   if (!request.authUser) {
     return reply
+  }
+}
+
+/** 管理操作在认证后额外校验管理员角色。 */
+export async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
+  if (!request.authUser) {
+    await authenticateToken(request, reply)
+  }
+  if (!request.authUser) return reply
+  if (request.authUser.role !== 'admin') {
+    return reply.code(403).send({
+      success: false,
+      error: 'FORBIDDEN',
+      message: '此操作仅允许管理员执行',
+    })
   }
 }

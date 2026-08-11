@@ -1,10 +1,10 @@
 import { io, type Socket } from 'socket.io-client'
-import { getToken } from '../api/client'
+import { expireAuth, getToken } from '../api/client'
 
 let socket: Socket | null = null
 
 export function getSocket(): Socket {
-  if (socket && socket.connected) return socket
+  if (socket?.connected) return socket
 
   if (socket) {
     socket.auth = { token: getToken() }
@@ -19,6 +19,12 @@ export function getSocket(): Socket {
     auth: {
       token: getToken(),
     },
+  })
+  socket.on('connect_error', (error) => {
+    if (error.message === 'UNAUTHORIZED') {
+      disconnectSocket()
+      expireAuth()
+    }
   })
 
   return socket

@@ -60,13 +60,28 @@ export function useDeploySession() {
           : prev,
       )
     }
+    const onConnect = async () => {
+      const sessionId = sessionIdRef.current
+      if (!sessionId) return
+      try {
+        const latest = await apiClient.get<DeploySessionSummary>(
+          `/api/v1/deploy/sessions/${sessionId}`,
+        )
+        setSession(latest)
+        if (latest.error) setError(latest.error)
+      } catch {
+        // 会话可能已按保留策略清理；保持当前 UI 状态
+      }
+    }
 
+    socket.on('connect', onConnect)
     socket.on(RealtimeEvents.deployProgress, onProgress)
     socket.on(RealtimeEvents.deployLog, onLog)
     socket.on(RealtimeEvents.deployComplete, onComplete)
     socket.on(RealtimeEvents.deployError, onError)
 
     return () => {
+      socket.off('connect', onConnect)
       socket.off(RealtimeEvents.deployProgress, onProgress)
       socket.off(RealtimeEvents.deployLog, onLog)
       socket.off(RealtimeEvents.deployComplete, onComplete)
@@ -93,7 +108,6 @@ export function useDeploySession() {
     const sessionId = sessionIdRef.current
     if (!sessionId) return
     await apiClient.post('/api/v1/deploy/cancel', { sessionId })
-    getSocket().emit(RealtimeEvents.deployCancel, { sessionId })
   }, [])
 
   /**

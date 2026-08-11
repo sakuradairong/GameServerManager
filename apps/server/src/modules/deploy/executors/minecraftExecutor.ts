@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { downloadFile } from '../../../adapters/download/HttpDownloader.js'
 import type { MinecraftDeployRequest } from '@gsm4/shared'
+import { assertSafePathSegment, resolveRelativePathInside } from '../../../lib/safePath.js'
 import { deployUploadService } from '../DeployUploadService.js'
 import type { DeployExecutor } from './types.js'
 
@@ -12,13 +13,19 @@ export const minecraftExecutor: DeployExecutor = {
     await fs.mkdir(ctx.installPath, { recursive: true })
 
     const source = request.source || (request.uploadId ? 'upload' : 'url')
-    let jarName = request.jarFileName || 'server.jar'
+    let jarName = assertSafePathSegment(request.jarFileName || 'server.jar', 'JAR 文件名')
 
     if (source === 'upload') {
       if (!request.uploadId) throw new Error('缺少 uploadId')
       const uploaded = await deployUploadService.resolve(request.uploadId, 'minecraft')
-      jarName = request.jarFileName || uploaded.fileName || 'server.jar'
-      const jarPath = path.join(ctx.installPath, jarName)
+      jarName = assertSafePathSegment(
+        request.jarFileName || uploaded.fileName || 'server.jar',
+        'JAR 文件名',
+      )
+      const jarPath = resolveRelativePathInside(ctx.installPath, jarName, {
+        allowRoot: false,
+        singleSegment: true,
+      })
 
       ctx.bus.emitLog({
         sessionId: ctx.sessionId,
@@ -35,7 +42,10 @@ export const minecraftExecutor: DeployExecutor = {
       await deployUploadService.consumeTo(jarPath, request.uploadId, 'minecraft')
     } else {
       if (!request.downloadUrl) throw new Error('缺少 downloadUrl')
-      const jarPath = path.join(ctx.installPath, jarName)
+      const jarPath = resolveRelativePathInside(ctx.installPath, jarName, {
+        allowRoot: false,
+        singleSegment: true,
+      })
 
       ctx.bus.emitLog({
         sessionId: ctx.sessionId,

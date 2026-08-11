@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { SteamGameInfo } from '@gsm4/shared'
+import { SteamCatalogSchema, type SteamCatalog, type SteamGameInfo } from '@gsm4/shared'
+import { fetchText } from '../../adapters/download/HttpDownloader.js'
+import { writeJsonAtomic } from '../../lib/atomicJson.js'
 import { resolveDataDir } from '../../lib/paths.js'
+
+const DEFAULT_CATALOG_URL =
+  'https://raw.githubusercontent.com/sakuradairong/GameServerManager/main/server/data/games/installgame.json'
+const MAX_CATALOG_BYTES = 5 * 1024 * 1024
 
 const SAMPLE_CATALOG: Record<string, SteamGameInfo> = {
   palworld: {
@@ -55,10 +61,16 @@ export class CatalogService {
     return target
   }
 
-  async listGames(): Promise<Record<string, SteamGameInfo>> {
+  async listGames(): Promise<SteamCatalog> {
     const filePath = await this.getCatalogPath()
     const raw = await fs.readFile(filePath, 'utf8')
-    return JSON.parse(raw) as Record<string, SteamGameInfo>
+    let parsedJson: unknown
+    try {
+      parsedJson = JSON.parse(raw)
+    } catch {
+      throw new Error('本地 Steam 目录不是有效 JSON')
+    }
+    return SteamCatalogSchema.parse(parsedJson)
   }
 
   async getGame(gameKey: string): Promise<SteamGameInfo | null> {
@@ -69,21 +81,28 @@ export class CatalogService {
   async syncFromRemote(remoteUrl?: string): Promise<{ count: number; path: string }> {
     const url =
       remoteUrl ||
-      'http://api.gsm.xiaozhuhouses.asia:8082/disk1/GSM3/installgame.json'
-    const response = await fetch(url, {
+      process.env.GSM4_STEAM_CATALOG_URL ||
+      DEFAULT_CATALOG_URL
+    const raw = await fetchText({
+      url,
       headers: { 'User-Agent': 'GSM4/4.0' },
-      signal: AbortSignal.timeout(30000),
+      timeoutMs: 30000,
+      maxBytes: MAX_CATALOG_BYTES,
+      requireHttps: true,
     })
-    if (!response.ok) {
-      throw new Error(`同步失败: HTTP ${response.status}`)
+    let parsedJson: unknown
+    try {
+      parsedJson = JSON.parse(raw)
+    } catch {
+      throw new Error('远程目录不是有效 JSON')
     }
-    const data = (await response.json()) as Record<string, SteamGameInfo>
-    if (!data || typeof data !== 'object') {
-      throw new Error('远程目录格式无效')
+    const parsed = SteamCatalogSchema.safeParse(parsedJson)
+    if (!parsed.success) {
+      throw new Error(`远程目录格式无效: ${parsed.error.issues[0]?.message || '未知错误'}`)
     }
     const filePath = await this.getCatalogPath()
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8')
-    return { count: Object.keys(data).length, path: filePath }
+    await writeJsonAtomic(filePath, parsed.data)
+    return { count: Object.keys(parsed.data).length, path: filePath }
   }
 }
 

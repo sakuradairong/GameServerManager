@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { CreateInstanceBody, Instance } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
 import { SteamUpdateDialog } from './SteamUpdateDialog'
 
 const emptyForm: CreateInstanceBody = {
@@ -22,6 +23,8 @@ export function InstancesPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [steamUpdateInstance, setSteamUpdateInstance] = useState<Instance | null>(null)
+  const [steamUpdateOpen, setSteamUpdateOpen] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Instance | null>(null)
 
   const refresh = useCallback(async () => {
     const data = await apiClient.get<Instance[]>('/api/v1/instances')
@@ -211,7 +214,10 @@ export function InstancesPage() {
                       type="button"
                       className="btn btn-ghost"
                       disabled={busyId === instance.id}
-                      onClick={() => setSteamUpdateInstance(instance)}
+                      onClick={() => {
+                        setSteamUpdateInstance(instance)
+                        setSteamUpdateOpen(true)
+                      }}
                     >
                       更新/分支
                     </button>
@@ -220,7 +226,7 @@ export function InstancesPage() {
                     type="button"
                     className="btn btn-danger"
                     disabled={busyId === instance.id}
-                    onClick={() => runAction(instance.id, 'delete')}
+                    onClick={() => setPendingDelete(instance)}
                   >
                     删除
                   </button>
@@ -234,12 +240,31 @@ export function InstancesPage() {
       {steamUpdateInstance && (
         <SteamUpdateDialog
           instance={steamUpdateInstance}
-          onClose={() => setSteamUpdateInstance(null)}
+          open={steamUpdateOpen}
+          onClose={() => setSteamUpdateOpen(false)}
+          onExited={() => setSteamUpdateInstance(null)}
           onUpdated={() => {
             refresh().catch(() => undefined)
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title="删除实例"
+        message={
+          pendingDelete
+            ? `确定删除实例「${pendingDelete.name}」吗？此操作不会删除其工作目录。`
+            : ''
+        }
+        confirmText="删除"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const target = pendingDelete
+          setPendingDelete(null)
+          if (target) void runAction(target.id, 'delete')
+        }}
+      />
     </div>
   )
 }

@@ -2,6 +2,8 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { DataManifestSchema, type DataManifest } from '@gsm4/shared'
+import { z } from 'zod'
+import { isFileNotFoundError, writeJsonAtomic } from '../../lib/atomicJson.js'
 import { resolveDataDir, resolveRepoRoot } from '../../lib/paths.js'
 
 export interface Gsm4Config {
@@ -23,6 +25,26 @@ export interface Gsm4Config {
     resetTokenOnStartup: boolean
   }
 }
+
+const ConfigFileSchema = z
+  .object({
+    jwt: z
+      .object({
+        secret: z.string().min(32).optional(),
+        expiresIn: z.string().min(1).optional(),
+      })
+      .optional(),
+    server: z
+      .object({
+        host: z.string().min(1).optional(),
+        port: z.number().int().positive().max(65535).optional(),
+      })
+      .optional(),
+    game: z.object({ defaultInstallPath: z.string().min(1).optional() }).optional(),
+    steamcmd: z.object({ path: z.string().optional() }).optional(),
+    security: z.object({ resetTokenOnStartup: z.boolean().optional() }).optional(),
+  })
+  .passthrough()
 
 export class ConfigManager {
   private config: Gsm4Config | null = null
@@ -79,14 +101,17 @@ export class ConfigManager {
     try {
       const raw = await fs.readFile(manifestPath, 'utf8')
       return DataManifestSchema.parse(JSON.parse(raw))
-    } catch {
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw new Error('data/manifest.json 损坏或无法读取', { cause: error })
+      }
       const manifest: DataManifest = {
         schemaVersion: 4,
         product: 'gsm4',
         createdAt: new Date().toISOString(),
         migratedFrom: null,
       }
-      await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+      await writeJsonAtomic(manifestPath, manifest)
       return manifest
     }
   }
@@ -116,28 +141,38 @@ export class ConfigManager {
 
   private async saveConfig(): Promise<void> {
     const configPath = path.join(this.getDataDir(), 'config.json')
-    await fs.writeFile(configPath, JSON.stringify(this.getConfig(), null, 2), 'utf8')
+    await writeJsonAtomic(configPath, this.getConfig())
   }
 
   private async loadOrCreateConfig(): Promise<Gsm4Config> {
     const configPath = path.join(this.dataDir!, 'config.json')
     const defaults = await this.defaultConfig()
+    let raw: string
     try {
-      const raw = await fs.readFile(configPath, 'utf8')
-      const parsed = JSON.parse(raw) as Partial<Gsm4Config>
-      const merged: Gsm4Config = {
-        ...defaults,
-        ...parsed,
-        jwt: { ...defaults.jwt, ...parsed.jwt },
-        server: { ...defaults.server, ...parsed.server },
-        game: { ...defaults.game, ...parsed.game },
-        steamcmd: { ...defaults.steamcmd, ...parsed.steamcmd },
-        security: { ...defaults.security, ...parsed.security },
+      raw = await fs.readFile(configPath, 'utf8')
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw new Error('data/config.json 无法读取', { cause: error })
       }
-      return merged
-    } catch {
-      await fs.writeFile(configPath, JSON.stringify(defaults, null, 2), 'utf8')
+      await writeJsonAtomic(configPath, defaults)
       return defaults
+    }
+
+    let parsed: z.infer<typeof ConfigFileSchema>
+    try {
+      parsed = ConfigFileSchema.parse(JSON.parse(raw))
+    } catch (error) {
+      throw new Error('data/config.json 损坏，已拒绝使用默认配置覆盖', { cause: error })
+    }
+
+    return {
+      ...defaults,
+      ...parsed,
+      jwt: { ...defaults.jwt, ...parsed.jwt },
+      server: { ...defaults.server, ...parsed.server },
+      game: { ...defaults.game, ...parsed.game },
+      steamcmd: { ...defaults.steamcmd, ...parsed.steamcmd },
+      security: { ...defaults.security, ...parsed.security },
     }
   }
 }

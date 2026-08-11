@@ -5,11 +5,12 @@ export * from './deploy.js'
 export * from './settings.js'
 export * from './files.js'
 export * from './steamcmd.js'
+export * from './plugin.js'
 
 import { z } from 'zod'
 
-export const TOKEN_STORAGE_KEY = 'gsm4_token'
-export const LEGACY_TOKEN_STORAGE_KEY = 'gsm3_token'
+export const TOKEN_STORAGE_KEY = 'gsm3_token'
+export const LEGACY_TOKEN_STORAGE_KEY = 'gsm4_token'
 export const USER_STORAGE_KEY = 'gsm4_user'
 
 export const ApiErrorSchema = z.object({
@@ -91,9 +92,7 @@ export const NAV_ITEMS = [
   { id: 'terminal', path: '/terminal', label: '终端' },
   { id: 'instances', path: '/instances', label: '实例' },
   { id: 'deploy', path: '/deploy', label: '游戏部署' },
-  { id: 'scheduled', path: '/scheduled-tasks', label: '定时任务' },
   { id: 'files', path: '/files', label: '文件' },
-  { id: 'environment', path: '/environment', label: '环境' },
   { id: 'plugins', path: '/plugins', label: '插件' },
   { id: 'settings', path: '/settings', label: '设置' },
   { id: 'about', path: '/about', label: '关于' },

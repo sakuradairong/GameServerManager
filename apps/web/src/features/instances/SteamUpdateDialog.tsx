@@ -7,11 +7,15 @@ import { DeployConsole } from '../deploy/components/DeployConsole'
 
 export function SteamUpdateDialog({
   instance,
+  open,
   onClose,
+  onExited,
   onUpdated,
 }: {
   instance: Instance
+  open: boolean
   onClose: () => void
+  onExited: () => void
   onUpdated: () => void
 }) {
   const { push } = useToast()
@@ -57,6 +61,8 @@ export function SteamUpdateDialog({
     } catch (error) {
       push(error instanceof ApiError ? error.message : '更新失败', 'error')
     } finally {
+      setBetaPassword('')
+      setSteamPassword('')
       setSubmitting(false)
     }
   }
@@ -64,7 +70,13 @@ export function SteamUpdateDialog({
   const branchChanged = branch.trim() !== currentBranch
 
   return (
-    <div className="modal-backdrop" onClick={running ? undefined : onClose}>
+    <div
+      className={`modal-backdrop${open ? '' : ' is-closing'}`}
+      onClick={running ? undefined : onClose}
+      onAnimationEnd={(event) => {
+        if (!open && event.target === event.currentTarget) onExited()
+      }}
+    >
       <div
         className="modal-card"
         role="dialog"
@@ -111,7 +123,14 @@ export function SteamUpdateDialog({
             <input
               type="checkbox"
               checked={anonymous}
-              onChange={(e) => setAnonymous(e.target.checked)}
+              onChange={(e) => {
+                const checked = e.target.checked
+                setAnonymous(checked)
+                if (checked) {
+                  setSteamUsername('')
+                  setSteamPassword('')
+                }
+              }}
               style={{ width: 'auto' }}
             />
             <span>匿名登录（免费专用服务端）</span>

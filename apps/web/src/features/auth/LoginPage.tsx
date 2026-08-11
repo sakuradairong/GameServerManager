@@ -24,6 +24,7 @@ export function LoginPage() {
         push('登录成功', 'success')
       }
     } catch (error) {
+      setPassword('')
       const message = error instanceof ApiError ? error.message : '操作失败'
       push(message, 'error')
     } finally {

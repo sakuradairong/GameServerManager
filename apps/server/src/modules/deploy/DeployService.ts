@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import path from 'node:path'
 import type {
   DeployRequest,
   DeploySessionSummary,
@@ -19,7 +20,6 @@ import { bedrockExecutor } from './executors/bedrockExecutor.js'
 import { tmodloaderExecutor } from './executors/tmodloaderExecutor.js'
 import { mrpackExecutor } from './executors/mrpackExecutor.js'
 import { factorioExecutor } from './executors/factorioExecutor.js'
-import { cloudExecutor } from './executors/cloudExecutor.js'
 import type { DeployExecutor } from './executors/types.js'
 
 interface LiveSession extends DeploySessionSummary {
@@ -29,6 +29,7 @@ interface LiveSession extends DeploySessionSummary {
   kind: 'create' | 'update'
   /** update 模式下的目标分支，成功后写回实例 steam.branch */
   steamTargetBranch?: string
+  reservedInstallPathKey: string
 }
 
 const executors: Record<DeployRequest['type'], DeployExecutor> = {
@@ -39,7 +40,13 @@ const executors: Record<DeployRequest['type'], DeployExecutor> = {
   tmodloader: tmodloaderExecutor,
   mrpack: mrpackExecutor,
   factorio: factorioExecutor,
-  cloud: cloudExecutor,
+}
+
+const TERMINAL_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000
+const MAX_RETAINED_SESSIONS = 500
+
+function isTerminalStatus(status: DeployStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
 }
 
 function resolveInstanceType(type: DeployRequest['type']): InstanceType {
@@ -58,8 +65,6 @@ function resolveInstanceType(type: DeployRequest['type']): InstanceType {
       return 'mrpack'
     case 'factorio':
       return 'factorio'
-    case 'cloud':
-      return 'cloud'
     default:
       return 'generic'
   }
@@ -67,17 +72,21 @@ function resolveInstanceType(type: DeployRequest['type']): InstanceType {
 
 export class DeployService {
   private sessions = new Map<string, LiveSession>()
+  private reservedInstallPaths = new Set<string>()
 
   list(): DeploySessionSummary[] {
+    this.pruneSessions()
     return [...this.sessions.values()].map((session) => this.toSummary(session))
   }
 
   get(sessionId: string): DeploySessionSummary | undefined {
+    this.pruneSessions()
     const session = this.sessions.get(sessionId)
     return session ? this.toSummary(session) : undefined
   }
 
   async start(raw: unknown): Promise<DeploySessionSummary> {
+    this.pruneSessions()
     const request = DeployRequestSchema.parse(raw)
     assertCapabilityAvailable(request.type)
 
@@ -92,24 +101,32 @@ export class DeployService {
       allowCustomPath: Boolean(request.allowCustomPath),
     })
 
+    const installPathKey = this.reserveInstallPath(installPath)
+
     const sessionId = crypto.randomUUID()
     const now = new Date().toISOString()
 
-    const draft = await instanceService.createFromDeploy({
-      name: request.instanceName,
-      workingDirectory: installPath,
-      startCommand: 'pending',
-      description: `deploy:${request.type}`,
-      instanceType: resolveInstanceType(request.type),
-      steam:
-        request.type === 'steamcmd'
-          ? {
-              appId: request.appId,
-              gameKey: request.gameKey,
-              branch: request.branch || 'public',
-            }
-          : undefined,
-    })
+    let draft
+    try {
+      draft = await instanceService.createFromDeploy({
+        name: request.instanceName,
+        workingDirectory: installPath,
+        startCommand: 'pending',
+        description: `deploy:${request.type}`,
+        instanceType: resolveInstanceType(request.type),
+        steam:
+          request.type === 'steamcmd'
+            ? {
+                appId: request.appId,
+                gameKey: request.gameKey,
+                branch: request.branch || 'public',
+              }
+            : undefined,
+      })
+    } catch (error) {
+      this.reservedInstallPaths.delete(installPathKey)
+      throw error
+    }
 
     const controller = new AbortController()
     const session: LiveSession = {
@@ -123,6 +140,7 @@ export class DeployService {
       controller,
       request,
       kind: 'create',
+      reservedInstallPathKey: installPathKey,
     }
     this.sessions.set(sessionId, session)
 
@@ -135,6 +153,7 @@ export class DeployService {
    * 复用 steamcmd 执行器与 deploy:* 进度事件，不新建实例、不改动启动命令。
    */
   async startSteamUpdate(instanceId: string, body: SteamUpdateBody): Promise<DeploySessionSummary> {
+    this.pruneSessions()
     const instance = instanceService.get(instanceId)
     if (!instance) {
       throw Object.assign(new Error('实例不存在'), { statusCode: 404 })
@@ -157,8 +176,14 @@ export class DeployService {
       steamPassword: body.steamPassword,
     }
 
-    // 加锁（运行中/锁定会抛错），确保不会与启停或另一次更新并发
-    instanceService.beginSteamUpdate(instanceId)
+    const installPathKey = this.reserveInstallPath(instance.workingDirectory)
+    try {
+      // 加锁（运行中/锁定会抛错），确保不会与启停或另一次更新并发
+      instanceService.beginSteamUpdate(instanceId)
+    } catch (error) {
+      this.reservedInstallPaths.delete(installPathKey)
+      throw error
+    }
 
     const sessionId = crypto.randomUUID()
     const now = new Date().toISOString()
@@ -174,6 +199,7 @@ export class DeployService {
       request,
       kind: 'update',
       steamTargetBranch: targetBranch,
+      reservedInstallPathKey: installPathKey,
     }
     this.sessions.set(sessionId, session)
 
@@ -210,12 +236,16 @@ export class DeployService {
     })
 
     try {
+      const { installPath, instanceId } = session
+      if (!installPath || !instanceId) {
+        throw new Error('部署会话缺少安装目录或实例标识')
+      }
       const executor = executors[session.request.type]
       const result = await executor.run({
         sessionId: session.sessionId,
         request: session.request,
-        installPath: session.installPath!,
-        instanceId: session.instanceId!,
+        installPath,
+        instanceId,
         signal: session.controller.signal,
         bus: progressBus,
         setTerminalSessionId: (terminalSessionId) => {
@@ -229,7 +259,7 @@ export class DeployService {
 
       if (session.kind === 'update') {
         // 更新模式：写回分支，保留实例与原启动命令
-        await instanceService.commitSteamUpdate(session.instanceId!, {
+        await instanceService.commitSteamUpdate(instanceId, {
           branch: session.steamTargetBranch,
         })
         this.patch(session, { status: 'completed' })
@@ -238,7 +268,7 @@ export class DeployService {
           this.patch(session, { installPath: result.workingDirectory })
         }
 
-        await instanceService.finalizeDeploy(session.instanceId!, {
+        await instanceService.finalizeDeploy(instanceId, {
           startCommand: result.startCommand,
           terminalSessionId: result.terminalSessionId,
           workingDirectory: result.workingDirectory || session.installPath,
@@ -284,6 +314,40 @@ export class DeployService {
         line: message,
         level: 'error',
       })
+    } finally {
+      this.reservedInstallPaths.delete(session.reservedInstallPathKey)
+    }
+  }
+
+  private installPathKey(installPath: string): string {
+    const resolved = path.resolve(installPath)
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  }
+
+  private reserveInstallPath(installPath: string): string {
+    const key = this.installPathKey(installPath)
+    if (this.reservedInstallPaths.has(key)) {
+      throw Object.assign(new Error('该安装目录已有部署或更新任务正在运行'), {
+        statusCode: 409,
+      })
+    }
+    this.reservedInstallPaths.add(key)
+    return key
+  }
+
+  private pruneSessions() {
+    const terminal = [...this.sessions.values()]
+      .filter((session) => isTerminalStatus(session.status))
+      .sort((first, second) => first.updatedAt.localeCompare(second.updatedAt))
+    const cutoff = Date.now() - TERMINAL_SESSION_RETENTION_MS
+    for (const session of terminal) {
+      if (Date.parse(session.updatedAt) < cutoff) this.sessions.delete(session.sessionId)
+    }
+
+    let excess = this.sessions.size - MAX_RETAINED_SESSIONS
+    for (const session of terminal) {
+      if (excess <= 0) break
+      if (this.sessions.delete(session.sessionId)) excess -= 1
     }
   }
 

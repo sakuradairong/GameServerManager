@@ -11,6 +11,7 @@ import {
   type InstanceType,
   type UpdateInstanceBody,
 } from '@gsm4/shared'
+import { isFileNotFoundError, writeJsonAtomic } from '../../lib/atomicJson.js'
 import { configManager } from '../config/ConfigManager.js'
 import { terminalService } from '../terminal/TerminalService.js'
 
@@ -18,6 +19,7 @@ export class InstanceService {
   private instances = new Map<string, Instance>()
   private locks = new Set<string>()
   private loaded = false
+  private persistQueue: Promise<void> = Promise.resolve()
 
   private filePath() {
     return path.join(configManager.getDataDir(), 'instances.json')
@@ -25,21 +27,46 @@ export class InstanceService {
 
   async init() {
     if (this.loaded) return
+    let raw: string
     try {
-      const raw = await fs.readFile(this.filePath(), 'utf8')
-      const parsed = JSON.parse(raw) as { instances?: Instance[] }
-      for (const item of parsed.instances || []) {
-        const instance = InstanceSchema.parse({
+      raw = await fs.readFile(this.filePath(), 'utf8')
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw new Error('data/instances.json 无法读取', { cause: error })
+      }
+      await this.persist()
+      this.loaded = true
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as { instances?: Array<Record<string, unknown>> }
+      if (!Array.isArray(parsed.instances)) {
+        throw new Error('instances 字段必须是数组')
+      }
+      let migratedLegacyCloudType = false
+      const restored = parsed.instances.map((item) => {
+        let instanceType = item.instanceType
+        if (instanceType === 'cloud') {
+          migratedLegacyCloudType = true
+          instanceType = 'generic'
+        }
+        return InstanceSchema.parse({
           ...item,
+          // 云构建能力已删除；保留已有实例，但迁移为普通实例。
+          instanceType,
           // 进程随面板重启结束
           status: item.status === 'running' || item.status === 'starting' ? 'stopped' : item.status,
           pid: undefined,
           terminalSessionId: undefined,
         })
+      })
+      for (const instance of restored) {
         this.instances.set(instance.id, instance)
       }
-    } catch {
-      await this.persist()
+      if (migratedLegacyCloudType) await this.persist()
+    } catch (error) {
+      throw new Error('data/instances.json 损坏，已拒绝覆盖原文件', { cause: error })
     }
     this.loaded = true
   }
@@ -198,11 +225,72 @@ export class InstanceService {
     if (this.locks.has(id)) {
       throw Object.assign(new Error('实例正在执行其它操作'), { statusCode: 409 })
     }
+
+    this.locks.add(id)
+    try {
+      return await this.startLocked(instance)
+    } finally {
+      this.locks.delete(id)
+    }
+  }
+
+  async stop(id: string): Promise<Instance> {
+    const instance = this.require(id)
+    if (this.locks.has(id)) {
+      throw Object.assign(new Error('实例正在执行其它操作'), { statusCode: 409 })
+    }
+    if (instance.status !== 'running' && instance.status !== 'starting') {
+      return instance
+    }
+
+    this.locks.add(id)
+    try {
+      return await this.stopLocked(instance)
+    } finally {
+      this.locks.delete(id)
+    }
+  }
+
+  async restart(id: string): Promise<Instance> {
+    const instance = this.require(id)
+    if (this.locks.has(id)) {
+      throw Object.assign(new Error('实例正在执行其它操作'), { statusCode: 409 })
+    }
+    this.locks.add(id)
+    try {
+      await this.stopLocked(instance)
+      return await this.startLocked(instance)
+    } finally {
+      this.locks.delete(id)
+    }
+  }
+
+  /** 终端退出时同步实例状态 */
+  async handleTerminalExit(sessionId: string) {
+    for (const instance of this.instances.values()) {
+      if (instance.terminalSessionId !== sessionId) continue
+      if (instance.status === 'stopping') continue
+      instance.status = 'stopped'
+      instance.pid = undefined
+      instance.terminalSessionId = undefined
+      instance.lastStopped = new Date().toISOString()
+      await this.persist()
+    }
+  }
+
+  private async waitForSessionExit(sessionId: string, timeoutMs: number) {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      if (!terminalService.getSession(sessionId)) return
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+  }
+
+  private async startLocked(instance: Instance): Promise<Instance> {
     if (instance.status === 'running' || instance.status === 'starting') {
       throw Object.assign(new Error('实例已在运行'), { statusCode: 409 })
     }
 
-    this.locks.add(id)
     try {
       await this.assertDirectory(instance.workingDirectory)
       instance.status = 'starting'
@@ -240,21 +328,14 @@ export class InstanceService {
       instance.pid = undefined
       await this.persist()
       throw error
-    } finally {
-      this.locks.delete(id)
     }
   }
 
-  async stop(id: string): Promise<Instance> {
-    const instance = this.require(id)
-    if (this.locks.has(id)) {
-      throw Object.assign(new Error('实例正在执行其它操作'), { statusCode: 409 })
-    }
+  private async stopLocked(instance: Instance): Promise<Instance> {
     if (instance.status !== 'running' && instance.status !== 'starting') {
       return instance
     }
 
-    this.locks.add(id)
     try {
       instance.status = 'stopping'
       await this.persist()
@@ -270,6 +351,14 @@ export class InstanceService {
         await this.waitForSessionExit(sessionId, 8000)
         if (terminalService.getSession(sessionId)) {
           terminalService.close(sessionId)
+          await this.waitForSessionExit(sessionId, 3000)
+        }
+        if (terminalService.getSession(sessionId)) {
+          terminalService.close(sessionId, true)
+          await this.waitForSessionExit(sessionId, 2000)
+        }
+        if (terminalService.getSession(sessionId)) {
+          throw new Error('实例进程未能停止')
         }
       }
 
@@ -284,34 +373,6 @@ export class InstanceService {
       instance.errorMessage = error instanceof Error ? error.message : '停止失败'
       await this.persist()
       throw error
-    } finally {
-      this.locks.delete(id)
-    }
-  }
-
-  async restart(id: string): Promise<Instance> {
-    await this.stop(id)
-    return this.start(id)
-  }
-
-  /** 终端退出时同步实例状态 */
-  async handleTerminalExit(sessionId: string) {
-    for (const instance of this.instances.values()) {
-      if (instance.terminalSessionId !== sessionId) continue
-      if (instance.status === 'stopping') continue
-      instance.status = 'stopped'
-      instance.pid = undefined
-      instance.terminalSessionId = undefined
-      instance.lastStopped = new Date().toISOString()
-      await this.persist()
-    }
-  }
-
-  private async waitForSessionExit(sessionId: string, timeoutMs: number) {
-    const started = Date.now()
-    while (Date.now() - started < timeoutMs) {
-      if (!terminalService.getSession(sessionId)) return
-      await new Promise((resolve) => setTimeout(resolve, 200))
     }
   }
 
@@ -335,10 +396,11 @@ export class InstanceService {
   }
 
   private async persist() {
-    const payload = {
-      instances: this.list(),
-    }
-    await fs.writeFile(this.filePath(), JSON.stringify(payload, null, 2), 'utf8')
+    const scheduled = this.persistQueue.catch(() => undefined).then(async () => {
+      await writeJsonAtomic(this.filePath(), { instances: this.list() })
+    })
+    this.persistQueue = scheduled
+    await scheduled
   }
 }
 

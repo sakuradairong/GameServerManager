@@ -3,6 +3,8 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import { configManager } from './modules/config/ConfigManager.js'
 import { instanceService } from './modules/instance/InstanceService.js'
+import { deployUploadService } from './modules/deploy/DeployUploadService.js'
+import { pluginManager } from './modules/plugin/PluginManager.js'
 import { healthRoutes } from './routes/health.js'
 import { authRoutes } from './routes/auth.js'
 import { configRoutes } from './routes/config.js'
@@ -13,20 +15,23 @@ import { deployRoutes } from './routes/deploy.js'
 import { catalogRoutes } from './routes/catalog.js'
 import { fileRoutes } from './routes/files.js'
 import { steamcmdRoutes } from './routes/steamcmd.js'
-import { cloudBuildRoutes } from './routes/cloudBuild.js'
+import { pluginRoutes } from './routes/plugins.js'
 import { staticWebPlugin } from './plugins/staticWeb.js'
 import { setupRealtime } from './socket/realtime.js'
+import { getConfiguredCorsOrigins } from './lib/cors.js'
 
 async function main() {
   await configManager.init()
+  await deployUploadService.init()
   await instanceService.init()
+  await pluginManager.init()
   const config = configManager.getConfig()
 
   const app = Fastify({
     logger: true,
   })
 
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
     if (!body || body.length === 0) {
       done(null, {})
       return
@@ -38,10 +43,13 @@ async function main() {
     }
   })
 
-  await app.register(cors, {
-    origin: true,
-    credentials: true,
-  })
+  const corsOrigins = getConfiguredCorsOrigins()
+  if (corsOrigins.length > 0) {
+    await app.register(cors, {
+      origin: corsOrigins,
+      credentials: true,
+    })
+  }
 
   await app.register(healthRoutes)
   await app.register(authRoutes)
@@ -53,7 +61,7 @@ async function main() {
   await app.register(catalogRoutes)
   await app.register(fileRoutes)
   await app.register(steamcmdRoutes)
-  await app.register(cloudBuildRoutes)
+  await app.register(pluginRoutes)
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error)

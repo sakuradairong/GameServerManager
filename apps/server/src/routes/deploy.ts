@@ -7,13 +7,16 @@ import {
 } from '@gsm4/shared'
 import { requireAuth } from '../plugins/auth.js'
 import { deployService } from '../modules/deploy/DeployService.js'
-import { deployUploadService } from '../modules/deploy/DeployUploadService.js'
+import {
+  DEPLOY_UPLOAD_FILE_LIMIT_BYTES,
+  deployUploadService,
+} from '../modules/deploy/DeployUploadService.js'
 import { getDeployPlatform, listAvailableCapabilities } from '../modules/deploy/platform.js'
 
 export const deployRoutes: FastifyPluginAsync = async (app) => {
   await app.register(multipart, {
     limits: {
-      fileSize: 512 * 1024 * 1024,
+      fileSize: DEPLOY_UPLOAD_FILE_LIMIT_BYTES,
     },
   })
 
@@ -66,8 +69,15 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         })
       }
 
-      const buffer = await file.toBuffer()
-      const uploaded = await deployUploadService.save(kindParsed.data, file.filename, buffer)
+      const uploaded = await deployUploadService.save(kindParsed.data, file.filename, file.file)
+      if (file.file.truncated) {
+        await deployUploadService.cleanup(uploaded.uploadId)
+        return reply.code(413).send({
+          success: false,
+          error: 'DEPLOY_UPLOAD_TOO_LARGE',
+          message: '上传文件超过 512MB 限制',
+        })
+      }
       return { success: true, data: uploaded, message: '上传成功，可开始部署' }
     } catch (error) {
       const err = error as Error & { statusCode?: number }

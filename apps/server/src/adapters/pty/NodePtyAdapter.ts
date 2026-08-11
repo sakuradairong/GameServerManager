@@ -13,7 +13,7 @@ export interface PtyHandle {
   pid: number
   write: (data: string) => void
   resize: (cols: number, rows: number) => void
-  kill: () => void
+  kill: (signal?: string) => void
   onData: (listener: (data: string) => void) => void
   onExit: (listener: (exitCode: number, signal?: number) => void) => void
 }
@@ -45,9 +45,9 @@ export function spawnPty(options: PtyLaunchOptions): PtyHandle {
     pid: term.pid,
     write: (data) => term.write(data),
     resize: (cols, rows) => term.resize(cols, rows),
-    kill: () => {
+    kill: (signal) => {
       try {
-        term.kill()
+        term.kill(signal)
       } catch {
         // ignore
       }

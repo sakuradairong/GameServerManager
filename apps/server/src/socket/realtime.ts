@@ -8,6 +8,7 @@ import { instanceService } from '../modules/instance/InstanceService.js'
 import { progressBus } from '../modules/deploy/ProgressBus.js'
 import { deployService } from '../modules/deploy/DeployService.js'
 import { steamcmdInstallBus } from '../modules/steamcmd/SteamcmdInstallBus.js'
+import { getConfiguredCorsOrigins, isAllowedRealtimeOrigin } from '../lib/cors.js'
 
 declare module 'socket.io' {
   interface SocketData {
@@ -16,14 +17,18 @@ declare module 'socket.io' {
 }
 
 export function setupRealtime(httpServer: HttpServer) {
+  const corsOrigins = getConfiguredCorsOrigins()
   const io = new Server(httpServer, {
-    cors: {
-      origin: true,
-      credentials: true,
+    cors: corsOrigins.length > 0 ? { origin: corsOrigins, credentials: true } : undefined,
+    allowRequest: (request, callback) => {
+      callback(
+        null,
+        isAllowedRealtimeOrigin(request.headers.origin, request.headers.host, corsOrigins),
+      )
     },
   })
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token =
         (socket.handshake.auth?.token as string | undefined) ||
@@ -34,7 +39,7 @@ export function setupRealtime(httpServer: HttpServer) {
         next(new Error('UNAUTHORIZED'))
         return
       }
-      socket.data.user = authService.verifyToken(token)
+      socket.data.user = await authService.verifyToken(token)
       next()
     } catch {
       next(new Error('UNAUTHORIZED'))
@@ -201,8 +206,6 @@ export function setupRealtime(httpServer: HttpServer) {
     socket.on(RealtimeEvents.closePty, (payload: { sessionId?: string }) => {
       const sessionId = payload?.sessionId || ''
       terminalService.close(sessionId)
-      io.emit(RealtimeEvents.ptyClosed, { sessionId })
-      io.emit(RealtimeEvents.sessionList, terminalService.listSessions())
     })
 
     socket.on('disconnect', () => {

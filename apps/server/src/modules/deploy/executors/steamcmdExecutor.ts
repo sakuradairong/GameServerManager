@@ -7,7 +7,15 @@ import type { DeployExecutor } from './types.js'
 
 function quoteArg(value: string) {
   if (!/[\s"]/u.test(value)) return value
-  return `"${value.replace(/"/g, '\\"')}"`
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+function redactSecrets(value: string, secrets: Array<string | undefined>): string {
+  let redacted = value
+  for (const secret of secrets) {
+    if (secret) redacted = redacted.split(secret).join('[REDACTED]')
+  }
+  return redacted
 }
 
 export const steamcmdExecutor: DeployExecutor = {
@@ -52,66 +60,75 @@ export const steamcmdExecutor: DeployExecutor = {
       '',
     ].join('\n')
 
-    await fs.writeFile(scriptPath, script, { encoding: 'utf8', mode: 0o600 })
+    try {
+      await fs.writeFile(scriptPath, script, { encoding: 'utf8', mode: 0o600 })
 
-    ctx.bus.emitLog({
-      sessionId: ctx.sessionId,
-      line: `启动 SteamCMD 安装 appId=${request.appId}`,
-      level: 'info',
-    })
-    ctx.bus.emitProgress({
-      sessionId: ctx.sessionId,
-      percent: 15,
-      stage: 'steamcmd',
-      message: 'SteamCMD 运行中',
-    })
+      ctx.bus.emitLog({
+        sessionId: ctx.sessionId,
+        line: `启动 SteamCMD 安装 appId=${request.appId}`,
+        level: 'info',
+      })
+      ctx.bus.emitProgress({
+        sessionId: ctx.sessionId,
+        percent: 15,
+        stage: 'steamcmd',
+        message: 'SteamCMD 运行中',
+      })
 
-    const child = spawn(steamcmdPath, ['+runscript', scriptPath], {
-      cwd: path.dirname(steamcmdPath),
-      env: process.env,
-    })
+      const child = spawn(steamcmdPath, ['+runscript', scriptPath], {
+        cwd: path.dirname(steamcmdPath),
+        env: process.env,
+      })
+      const secrets = [request.steamPassword, request.betaPassword]
+      const onAbort = () => {
+        child.kill('SIGTERM')
+      }
+      ctx.signal.addEventListener('abort', onAbort, { once: true })
 
-    const onAbort = () => {
-      child.kill('SIGTERM')
-    }
-    ctx.signal.addEventListener('abort', onAbort, { once: true })
-
-    await new Promise<void>((resolve, reject) => {
-      child.stdout?.on('data', (buf: Buffer) => {
-        const line = buf.toString('utf8')
-        for (const piece of line.split(/\r?\n/)) {
-          if (piece.trim()) {
-            ctx.bus.emitLog({ sessionId: ctx.sessionId, line: piece, level: 'info' })
-          }
-        }
-        const match = line.match(/progress:\s*(\d+)/i)
-        if (match) {
-          ctx.bus.emitProgress({
-            sessionId: ctx.sessionId,
-            percent: Math.min(90, Number(match[1])),
-            stage: 'steamcmd',
+      try {
+        await new Promise<void>((resolve, reject) => {
+          child.stdout?.on('data', (buf: Buffer) => {
+            const line = buf.toString('utf8')
+            for (const piece of line.split(/\r?\n/)) {
+              if (piece.trim()) {
+                ctx.bus.emitLog({
+                  sessionId: ctx.sessionId,
+                  line: redactSecrets(piece, secrets),
+                  level: 'info',
+                })
+              }
+            }
+            const match = line.match(/progress:\s*(\d+)/i)
+            if (match) {
+              ctx.bus.emitProgress({
+                sessionId: ctx.sessionId,
+                percent: Math.min(90, Number(match[1])),
+                stage: 'steamcmd',
+              })
+            }
           })
-        }
-      })
-      child.stderr?.on('data', (buf: Buffer) => {
-        const line = buf.toString('utf8').trim()
-        if (line) {
-          ctx.bus.emitLog({ sessionId: ctx.sessionId, line, level: 'warn' })
-        }
-      })
-      child.on('error', reject)
-      child.on('close', (code) => {
+          child.stderr?.on('data', (buf: Buffer) => {
+            const line = redactSecrets(buf.toString('utf8').trim(), secrets)
+            if (line) {
+              ctx.bus.emitLog({ sessionId: ctx.sessionId, line, level: 'warn' })
+            }
+          })
+          child.on('error', reject)
+          child.on('close', (code) => {
+            if (ctx.signal.aborted) {
+              reject(new Error('部署已取消'))
+              return
+            }
+            if (code === 0) resolve()
+            else reject(new Error(`SteamCMD 退出码 ${code}`))
+          })
+        })
+      } finally {
         ctx.signal.removeEventListener('abort', onAbort)
-        if (ctx.signal.aborted) {
-          reject(new Error('部署已取消'))
-          return
-        }
-        if (code === 0) resolve()
-        else reject(new Error(`SteamCMD 退出码 ${code}`))
-      })
-    })
-
-    await fs.unlink(scriptPath).catch(() => undefined)
+      }
+    } finally {
+      await fs.unlink(scriptPath).catch(() => undefined)
+    }
 
     const startCommand =
       request.startCommand ||

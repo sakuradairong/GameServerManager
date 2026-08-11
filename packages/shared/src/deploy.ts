@@ -8,7 +8,6 @@ export const DeployTypeSchema = z.enum([
   'tmodloader',
   'mrpack',
   'factorio',
-  'cloud',
 ])
 export type DeployType = z.infer<typeof DeployTypeSchema>
 
@@ -74,29 +73,30 @@ export const DEPLOY_CAPABILITIES: DeployCapability[] = [
     platforms: ['linux'],
     label: 'Factorio',
   },
-  {
-    type: 'cloud',
-    platforms: ['windows', 'linux', 'linux_arm'],
-    label: '云构建',
-  },
 ]
 
 export const MrpackLoaderSchema = z.enum(['fabric', 'quilt', 'forge', 'neoforge'])
 export type MrpackLoader = z.infer<typeof MrpackLoaderSchema>
 
+const UploadIdSchema = z.string().uuid()
+const SteamScriptTextSchema = z
+  .string()
+  .max(256)
+  .refine((value) => !/[\r\n]/u.test(value), { message: '不能包含换行符' })
+
 export const SteamDeployRequestSchema = z.object({
   type: z.literal('steamcmd'),
   gameKey: z.string().min(1),
-  appId: z.string().min(1),
+  appId: z.string().regex(/^\d+$/u, 'appId 必须是数字'),
   instanceName: z.string().min(1).max(128),
   installName: z.string().min(1).max(128).optional(),
   customInstallPath: z.string().optional(),
   allowCustomPath: z.boolean().optional(),
-  branch: z.string().optional(),
-  betaPassword: z.string().optional(),
+  branch: z.string().max(128).regex(/^[A-Za-z0-9._-]+$/u, '分支名格式无效').optional(),
+  betaPassword: SteamScriptTextSchema.optional(),
   anonymous: z.boolean().optional(),
-  steamUsername: z.string().optional(),
-  steamPassword: z.string().optional(),
+  steamUsername: SteamScriptTextSchema.optional(),
+  steamPassword: SteamScriptTextSchema.optional(),
   startCommand: z.string().optional(),
 })
 export type SteamDeployRequest = z.infer<typeof SteamDeployRequestSchema>
@@ -104,11 +104,11 @@ export type SteamDeployRequest = z.infer<typeof SteamDeployRequestSchema>
 /** 对已存在的 Steam 实例执行更新 / 分支切换（复用 steamcmd 执行器与 deploy:* 进度） */
 export const SteamUpdateBodySchema = z.object({
   /** 目标分支；缺省时沿用实例当前分支或 public */
-  branch: z.string().max(128).optional(),
-  betaPassword: z.string().optional(),
+  branch: z.string().max(128).regex(/^[A-Za-z0-9._-]+$/u, '分支名格式无效').optional(),
+  betaPassword: SteamScriptTextSchema.optional(),
   anonymous: z.boolean().optional(),
-  steamUsername: z.string().optional(),
-  steamPassword: z.string().optional(),
+  steamUsername: SteamScriptTextSchema.optional(),
+  steamPassword: SteamScriptTextSchema.optional(),
 })
 export type SteamUpdateBody = z.infer<typeof SteamUpdateBodySchema>
 
@@ -119,8 +119,14 @@ export const MinecraftDeployRequestSchema = z
     installName: z.string().min(1).max(128),
     source: DeploySourceSchema.optional(),
     downloadUrl: z.string().url().optional(),
-    uploadId: z.string().min(1).optional(),
-    jarFileName: z.string().min(1).optional(),
+    uploadId: UploadIdSchema.optional(),
+    jarFileName: z
+      .string()
+      .min(1)
+      .refine((value) => !/[\\/<>:"|?*\x00-\x1F]/u.test(value) && value !== '.' && value !== '..', {
+        message: 'jarFileName 必须是安全的单个文件名',
+      })
+      .optional(),
     javaCommand: z.string().optional(),
     customInstallPath: z.string().optional(),
     allowCustomPath: z.boolean().optional(),
@@ -152,7 +158,7 @@ export const ArchiveDeployRequestSchema = z
     installName: z.string().min(1).max(128),
     source: DeploySourceSchema.optional(),
     archiveUrl: z.string().url().optional(),
-    uploadId: z.string().min(1).optional(),
+    uploadId: UploadIdSchema.optional(),
     startCommand: z.string().min(1),
     customInstallPath: z.string().optional(),
     allowCustomPath: z.boolean().optional(),
@@ -203,7 +209,7 @@ export const MrpackDeployRequestSchema = z
     installName: z.string().min(1).max(128),
     source: DeploySourceSchema.optional(),
     mrpackUrl: z.string().url().optional(),
-    uploadId: z.string().min(1).optional(),
+    uploadId: UploadIdSchema.optional(),
     /** 覆盖自动检测的加载器；缺省时按 modrinth.index.json 的 dependencies 推断 */
     loaderType: MrpackLoaderSchema.optional(),
     /** 覆盖整合包声明的 Minecraft 版本 */
@@ -244,63 +250,6 @@ export const FactorioDeployRequestSchema = z.object({
 })
 export type FactorioDeployRequest = z.infer<typeof FactorioDeployRequestSchema>
 
-export const CloudBuildParamsSchema = z.object({
-  coreType: z.string().trim().min(1).max(64),
-  version: z.string().trim().min(1).max(128),
-  mcVersion: z.string().trim().min(1).max(128),
-})
-export type CloudBuildParams = z.infer<typeof CloudBuildParamsSchema>
-
-export const CloudBuildCatalogSchema = z
-  .object({
-    coreTypes: z.array(z.string().min(1)).optional(),
-    versions: z.array(z.string().min(1)).optional(),
-  })
-  .passthrough()
-  .refine((value) => Boolean(value.coreTypes || value.versions), {
-    message: '云构建目录响应缺少 coreTypes 或 versions',
-  })
-export type CloudBuildCatalog = z.infer<typeof CloudBuildCatalogSchema>
-
-export const CloudBuildTaskCreatedSchema = z
-  .object({
-    requestId: z.string().min(1),
-    accessToken: z.string().min(1),
-    message: z.string().optional(),
-  })
-  .passthrough()
-export type CloudBuildTaskCreated = z.infer<typeof CloudBuildTaskCreatedSchema>
-
-export const CloudBuildArtifactSchema = z
-  .object({
-    downloadUrl: z.string().min(1),
-    archiveFileName: z.string().min(1).optional(),
-    coreType: z.string().optional(),
-    version: z.string().optional(),
-    mcVersion: z.string().optional(),
-  })
-  .passthrough()
-export type CloudBuildArtifact = z.infer<typeof CloudBuildArtifactSchema>
-
-export const CloudBuildTaskStatusSchema = z
-  .object({
-    requestId: z.string().optional(),
-    status: z.string().min(1),
-    message: z.string().optional(),
-    data: z.unknown().optional(),
-  })
-  .passthrough()
-export type CloudBuildTaskStatus = z.infer<typeof CloudBuildTaskStatusSchema>
-
-export const CloudDeployRequestSchema = CloudBuildParamsSchema.extend({
-  type: z.literal('cloud'),
-  instanceName: z.string().min(1).max(128),
-  installName: z.string().min(1).max(128),
-  customInstallPath: z.string().optional(),
-  allowCustomPath: z.boolean().optional(),
-})
-export type CloudDeployRequest = z.infer<typeof CloudDeployRequestSchema>
-
 export const DeployRequestSchema = z.union([
   SteamDeployRequestSchema,
   MinecraftDeployRequestSchema,
@@ -309,7 +258,6 @@ export const DeployRequestSchema = z.union([
   TmodloaderDeployRequestSchema,
   MrpackDeployRequestSchema,
   FactorioDeployRequestSchema,
-  CloudDeployRequestSchema,
 ])
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 
@@ -317,11 +265,11 @@ export const DeployUploadKindSchema = z.enum(['minecraft', 'archive', 'mrpack'])
 export type DeployUploadKind = z.infer<typeof DeployUploadKindSchema>
 
 export const DeployUploadResultSchema = z.object({
-  uploadId: z.string(),
+  uploadId: UploadIdSchema,
   kind: DeployUploadKindSchema,
-  fileName: z.string(),
-  size: z.number(),
-  createdAt: z.string(),
+  fileName: z.string().min(1).max(255),
+  size: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
 })
 export type DeployUploadResult = z.infer<typeof DeployUploadResultSchema>
 
@@ -360,12 +308,21 @@ export type DeployLog = z.infer<typeof DeployLogSchema>
 
 export const SteamGameInfoSchema = z.object({
   game_nameCN: z.string().optional(),
-  appid: z.union([z.string(), z.number()]).optional(),
+  appid: z
+    .union([z.string().regex(/^\d+$/u), z.number().int().nonnegative()])
+    .optional(),
   tip: z.string().optional(),
-  image: z.string().optional(),
-  system: z.string().optional(),
+  image: z.string().url().optional(),
+  system: z.union([z.string(), z.array(z.string())]).optional(),
   system_info: z.array(z.string()).optional(),
   start_command: z.unknown().optional(),
   login_anonymous: z.boolean().optional(),
-})
+}).passthrough()
 export type SteamGameInfo = z.infer<typeof SteamGameInfoSchema>
+
+export const SteamCatalogSchema = z
+  .record(SteamGameInfoSchema)
+  .refine((catalog) => Object.keys(catalog).length <= 2000, {
+    message: 'Steam 目录条目数量超过限制',
+  })
+export type SteamCatalog = z.infer<typeof SteamCatalogSchema>

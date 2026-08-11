@@ -6,12 +6,12 @@ import {
   FileWriteBodySchema,
 } from '@gsm4/shared'
 import { requireAuth } from '../plugins/auth.js'
-import { fileService } from '../modules/files/FileService.js'
+import { FILE_UPLOAD_LIMIT_BYTES, fileService } from '../modules/files/FileService.js'
 
 export const fileRoutes: FastifyPluginAsync = async (app) => {
   await app.register(multipart, {
     limits: {
-      fileSize: 100 * 1024 * 1024,
+      fileSize: FILE_UPLOAD_LIMIT_BYTES,
     },
   })
 
@@ -129,8 +129,15 @@ export const fileRoutes: FastifyPluginAsync = async (app) => {
           message: '缺少上传文件',
         })
       }
-      const buffer = await file.toBuffer()
-      const saved = await fileService.saveUpload(query.dir || '', file.filename, buffer)
+      const saved = await fileService.saveUpload(query.dir || '', file.filename, file.file)
+      if (file.file.truncated) {
+        await fileService.remove(saved.path)
+        return reply.code(413).send({
+          success: false,
+          error: 'FILE_TOO_LARGE',
+          message: '上传文件超过 100MB 限制',
+        })
+      }
       return { success: true, data: saved, message: '上传成功' }
     } catch (error) {
       const err = error as Error & { statusCode?: number }

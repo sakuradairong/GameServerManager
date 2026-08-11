@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+coverage
+*.log
+.env
+.env.*
+data/*
+!data/manifest.json
+games

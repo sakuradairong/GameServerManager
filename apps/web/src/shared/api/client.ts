@@ -42,6 +42,21 @@ export function getToken() {
   return readToken()
 }
 
+const AUTH_EXPIRED_EVENT = 'gsm4:auth-expired'
+
+export function expireAuth() {
+  setToken(null)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+  }
+}
+
+export function onAuthExpired(listener: () => void) {
+  if (typeof window === 'undefined') return () => undefined
+  window.addEventListener(AUTH_EXPIRED_EVENT, listener)
+  return () => window.removeEventListener(AUTH_EXPIRED_EVENT, listener)
+}
+
 class ApiClient {
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers || {})
@@ -57,7 +72,10 @@ class ApiClient {
     const response = await fetch(path, {
       ...init,
       headers,
+      cache: 'no-store',
     })
+
+    if (response.status === 401) expireAuth()
 
     const json = (await response.json().catch(() => null)) as
       | { success: true; data: T; message?: string }
@@ -113,7 +131,9 @@ class ApiClient {
       method: 'POST',
       headers,
       body: form,
+      cache: 'no-store',
     })
+    if (response.status === 401) expireAuth()
     const json = (await response.json().catch(() => null)) as
       | { success: true; data: T; message?: string }
       | ApiErrorBody

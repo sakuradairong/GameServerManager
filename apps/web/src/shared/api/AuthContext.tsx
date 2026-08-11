@@ -8,11 +8,12 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  PublicUserSchema,
   USER_STORAGE_KEY,
   type LoginResult,
   type PublicUser,
 } from '@gsm4/shared'
-import { apiClient, getToken, setToken } from './client'
+import { apiClient, getToken, onAuthExpired, setToken } from './client'
 import { disconnectSocket, refreshSocketAuth } from '../realtime/socket'
 
 interface AuthStatus {
@@ -35,7 +36,9 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 function readCachedUser(): PublicUser | null {
   try {
     const raw = localStorage.getItem(USER_STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as PublicUser) : null
+    if (!raw) return null
+    const parsed = PublicUserSchema.safeParse(JSON.parse(raw))
+    return parsed.success ? parsed.data : null
   } catch {
     return null
   }
@@ -63,6 +66,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const me = await apiClient.get<PublicUser>('/api/v1/auth/me')
     persistUser(me)
   }, [persistUser])
+
+  useEffect(
+    () =>
+      onAuthExpired(() => {
+        disconnectSocket()
+        persistUser(null)
+      }),
+    [persistUser],
+  )
 
   useEffect(() => {
     let cancelled = false

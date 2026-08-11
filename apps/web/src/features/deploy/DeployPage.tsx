@@ -9,7 +9,6 @@ import { BedrockDeployPanel } from './bedrock/BedrockDeployPanel'
 import { TmodloaderDeployPanel } from './tmodloader/TmodloaderDeployPanel'
 import { MrpackDeployPanel } from './mrpack/MrpackDeployPanel'
 import { FactorioDeployPanel } from './factorio/FactorioDeployPanel'
-import { CloudDeployPanel } from './cloud/CloudDeployPanel'
 
 type CapabilitiesResponse = {
   platform: DeployPlatform
@@ -108,9 +107,6 @@ export function DeployPage() {
       </div>
       <div hidden={tab !== 'factorio'}>
         <FactorioDeployPanel />
-      </div>
-      <div hidden={tab !== 'cloud'}>
-        <CloudDeployPanel />
       </div>
     </div>
   )

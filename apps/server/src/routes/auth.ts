@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { LoginBodySchema, RegisterBodySchema } from '@gsm4/shared'
 import { authService } from '../modules/auth/AuthService.js'
+import { loginAttemptLimiter } from '../modules/auth/LoginAttemptLimiter.js'
 import { requireAuth } from '../plugins/auth.js'
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
@@ -50,11 +51,16 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       })
     }
 
+    const attemptKey = `${request.ip}:${parsed.data.username.trim().toLowerCase()}`
     try {
+      loginAttemptLimiter.assertAllowed(attemptKey)
       const result = await authService.login(parsed.data)
+      loginAttemptLimiter.clear(attemptKey)
       return { success: true, data: result, message: '登录成功' }
     } catch (error) {
-      const err = error as Error & { statusCode?: number }
+      const err = error as Error & { statusCode?: number; retryAfter?: number }
+      if (err.statusCode === 401) loginAttemptLimiter.recordFailure(attemptKey)
+      if (err.retryAfter) reply.header('Retry-After', String(err.retryAfter))
       return reply.code(err.statusCode ?? 500).send({
         success: false,
         error: 'LOGIN_FAILED',

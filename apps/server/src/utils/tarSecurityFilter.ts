@@ -5,12 +5,57 @@ import path from 'node:path'
 import * as tar from 'tar'
 
 type TarExtractOptions = Parameters<typeof tar.extract>[0]
+const DEFAULT_MAX_EXTRACTED_BYTES = 64 * 1024 * 1024 * 1024
+
+export function maxExtractedBytes(): number {
+  const configured = Number(process.env.GSM4_MAX_EXTRACTED_BYTES)
+  return Number.isSafeInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_EXTRACTED_BYTES
+}
+
+function isAbsolutePortable(value: string): boolean {
+  return path.posix.isAbsolute(value) || path.win32.isAbsolute(value)
+}
+
+function containsParentSegment(value: string): boolean {
+  return value.split(/[\\/]+/u).includes('..')
+}
+
+function hasUnsafeLinkTarget(entry: tar.ReadEntry): boolean {
+  const linkpath = entry.linkpath
+  return Boolean(
+    linkpath && (isAbsolutePortable(linkpath) || containsParentSegment(linkpath)),
+  )
+}
+
+function isRejectedLink(
+  entry: tar.ReadEntry,
+  blockSymbolicLinks: boolean,
+  blockHardLinks: boolean,
+): boolean {
+  if (entry.type === 'SymbolicLink') {
+    return blockSymbolicLinks || hasUnsafeLinkTarget(entry)
+  }
+  if (entry.type === 'Link') {
+    return blockHardLinks || hasUnsafeLinkTarget(entry)
+  }
+  return false
+}
+
+function pathEscapesRoot(cwd: string, filePath: string): boolean {
+  if (isAbsolutePortable(filePath) || containsParentSegment(filePath)) return true
+  const resolvedPath = path.resolve(cwd, filePath)
+  const resolvedCwd = path.resolve(cwd)
+  return resolvedPath !== resolvedCwd && !resolvedPath.startsWith(resolvedCwd + path.sep)
+}
 
 export interface TarSecurityFilterOptions {
   cwd: string
   blockSymbolicLinks?: boolean
   blockHardLinks?: boolean
-  verbose?: boolean
+  onLimitExceeded?: () => void
+  onEntryRejected?: (filePath: string) => void
 }
 
 export function createTarSecurityFilter(options: TarSecurityFilterOptions) {
@@ -18,51 +63,30 @@ export function createTarSecurityFilter(options: TarSecurityFilterOptions) {
     cwd,
     blockSymbolicLinks = true,
     blockHardLinks = true,
-    verbose = false,
+    onLimitExceeded,
+    onEntryRejected,
   } = options
+  let extractedBytes = 0
+  const byteLimit = maxExtractedBytes()
+  let limitExceeded = false
 
   return (filePath: string, entry: tar.ReadEntry): boolean => {
-    if (entry.type === 'SymbolicLink') {
-      if (blockSymbolicLinks) {
-        if (verbose) console.warn(`[TAR安全过滤] 阻止符号链接: ${filePath}`)
-        return false
-      }
-      const linkpath = (entry as { linkpath?: string }).linkpath
-      if (linkpath && (path.isAbsolute(linkpath) || linkpath.includes('..'))) {
-        if (verbose) console.warn(`[TAR安全过滤] 阻止危险符号链接: ${filePath} -> ${linkpath}`)
-        return false
-      }
-    }
-
-    if (entry.type === 'Link') {
-      if (blockHardLinks) {
-        if (verbose) console.warn(`[TAR安全过滤] 阻止硬链接: ${filePath}`)
-        return false
-      }
-      const linkpath = (entry as { linkpath?: string }).linkpath
-      if (linkpath && (path.isAbsolute(linkpath) || linkpath.includes('..'))) {
-        if (verbose) console.warn(`[TAR安全过滤] 阻止危险硬链接: ${filePath} -> ${linkpath}`)
+    if (limitExceeded) return false
+    const entrySize = Number(entry.size)
+    if (Number.isFinite(entrySize) && entrySize > 0) {
+      extractedBytes += entrySize
+      if (extractedBytes > byteLimit) {
+        limitExceeded = true
+        onLimitExceeded?.()
         return false
       }
     }
 
-    if (path.isAbsolute(filePath)) {
-      if (verbose) console.warn(`[TAR安全过滤] 阻止绝对路径: ${filePath}`)
-      return false
-    }
-
-    if (filePath.includes('..')) {
-      if (verbose) console.warn(`[TAR安全过滤] 阻止路径遍历: ${filePath}`)
-      return false
-    }
-
-    const resolvedPath = path.resolve(cwd, filePath)
-    const resolvedCwd = path.resolve(cwd)
     if (
-      resolvedPath !== resolvedCwd &&
-      !resolvedPath.startsWith(resolvedCwd + path.sep)
+      isRejectedLink(entry, blockSymbolicLinks, blockHardLinks) ||
+      pathEscapesRoot(cwd, filePath)
     ) {
-      if (verbose) console.warn(`[TAR安全过滤] 阻止目录逃逸: ${filePath}`)
+      onEntryRejected?.(filePath)
       return false
     }
 
@@ -70,15 +94,23 @@ export function createTarSecurityFilter(options: TarSecurityFilterOptions) {
   }
 }
 
+export interface SafeTarExtractOptions {
+  tarOptions?: Partial<TarExtractOptions>
+  onLimitExceeded?: () => void
+  onEntryRejected?: (filePath: string) => void
+}
+
 export function createSafeTarExtractOptions(
   file: string,
   cwd: string,
-  additionalOptions?: Partial<TarExtractOptions>,
+  options: SafeTarExtractOptions = {},
 ): TarExtractOptions {
+  const { tarOptions, onLimitExceeded, onEntryRejected } = options
   return {
+    ...tarOptions,
     file,
     cwd,
-    filter: createTarSecurityFilter({ cwd }),
-    ...additionalOptions,
+    maxDecompressionRatio: Math.min(tarOptions?.maxDecompressionRatio ?? 100, 100),
+    filter: createTarSecurityFilter({ cwd, onLimitExceeded, onEntryRejected }),
   } as TarExtractOptions
 }

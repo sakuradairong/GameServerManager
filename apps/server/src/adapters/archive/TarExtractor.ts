@@ -3,12 +3,39 @@ import fs from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { createSafeTarExtractOptions } from '../../utils/tarSecurityFilter.js'
+import {
+  createSafeTarExtractOptions,
+  maxExtractedBytes,
+} from '../../utils/tarSecurityFilter.js'
+
+async function extractSafeTar(archivePath: string, destination: string) {
+  let limitExceeded = false
+  let rejectedEntry: string | undefined
+  await tar.extract(
+    createSafeTarExtractOptions(
+      archivePath,
+      destination,
+      {
+        onLimitExceeded: () => {
+          limitExceeded = true
+        },
+        onEntryRejected: (filePath) => {
+          rejectedEntry ||= filePath
+        },
+      },
+    ),
+  )
+  if (limitExceeded) {
+    throw new Error(`归档解压后超过 ${maxExtractedBytes()} 字节限制`)
+  }
+  if (rejectedEntry) throw new Error(`归档包含不安全条目: ${rejectedEntry}`)
+}
 
 export async function extractTarGzArchive(archivePath: string, destination: string) {
   await fs.mkdir(destination, { recursive: true })
-  await tar.extract(createSafeTarExtractOptions(archivePath, destination))
+  await extractSafeTar(archivePath, destination)
 }
 
 /**
@@ -27,6 +54,18 @@ export async function extractTarXzArchive(
   )
 
   const xz = spawn('xz', ['-dc', archivePath], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let decompressedBytes = 0
+  const byteLimit = maxExtractedBytes()
+  const sizeLimiter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      decompressedBytes += chunk.length
+      if (decompressedBytes > byteLimit) {
+        callback(new Error(`归档解压后超过 ${byteLimit} 字节限制`))
+        return
+      }
+      callback(null, chunk)
+    },
+  })
   let stderr = ''
   xz.stderr.on('data', (chunk: Buffer) => {
     stderr += chunk.toString('utf8')
@@ -41,14 +80,15 @@ export async function extractTarXzArchive(
   })
 
   try {
-    await pipeline(xz.stdout, createWriteStream(tarPath))
+    await pipeline(xz.stdout, sizeLimiter, createWriteStream(tarPath))
     const code = await exitCode
     if (code !== 0) {
       throw new Error(`xz 解压失败（退出码 ${code}）: ${stderr.trim() || '未知错误'}`)
     }
-    await tar.extract(createSafeTarExtractOptions(tarPath, destination))
+    await extractSafeTar(tarPath, destination)
   } finally {
     signal?.removeEventListener('abort', onAbort)
+    xz.kill('SIGKILL')
     await fs.rm(tarPath, { force: true }).catch(() => undefined)
   }
 }
