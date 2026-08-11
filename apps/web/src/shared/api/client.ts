@@ -58,6 +58,19 @@ export function onAuthExpired(listener: () => void) {
 }
 
 class ApiClient {
+  private getCache = new Map<string, { expires: number; value: unknown }>()
+  private inflightGets = new Map<string, Promise<unknown>>()
+
+  invalidateGetCache(pathPrefix?: string) {
+    if (!pathPrefix) {
+      this.getCache.clear()
+      return
+    }
+    for (const key of this.getCache.keys()) {
+      if (key.startsWith(pathPrefix)) this.getCache.delete(key)
+    }
+  }
+
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers || {})
     if (!headers.has('Content-Type') && init.body) {
@@ -97,11 +110,29 @@ class ApiClient {
     return json.data
   }
 
-  get<T>(path: string) {
-    return this.request<T>(path)
+  get<T>(path: string, options?: { cacheTtlMs?: number }) {
+    const ttl = options?.cacheTtlMs
+    if (!ttl || ttl <= 0) return this.request<T>(path)
+
+    const cached = this.getCache.get(path)
+    if (cached && cached.expires > Date.now()) {
+      return Promise.resolve(cached.value as T)
+    }
+
+    const inflight = this.inflightGets.get(path)
+    if (inflight) return inflight as Promise<T>
+
+    const promise = this.request<T>(path).then((data) => {
+      this.getCache.set(path, { value: data, expires: Date.now() + ttl })
+      this.inflightGets.delete(path)
+      return data
+    })
+    this.inflightGets.set(path, promise)
+    return promise
   }
 
   post<T>(path: string, body: unknown = {}) {
+    this.invalidateGetCache('/api/v1/')
     return this.request<T>(path, {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
@@ -109,6 +140,7 @@ class ApiClient {
   }
 
   put<T>(path: string, body: unknown = {}) {
+    this.invalidateGetCache('/api/v1/')
     return this.request<T>(path, {
       method: 'PUT',
       body: JSON.stringify(body ?? {}),

@@ -1,6 +1,7 @@
+import { memo } from 'react'
 import type { DeployProgress, DeploySessionSummary } from '@gsm4/shared'
 
-export function DeployConsole({
+export const DeployConsole = memo(function DeployConsole({
   session,
   progress,
   logs,
@@ -39,4 +40,4 @@ export function DeployConsole({
       <pre className="deploy-log">{logs.join('\n') || '暂无日志'}</pre>
     </div>
   )
-}
+})

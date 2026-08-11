@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { ApiError } from '../../../shared/api/client'
 import { useToast } from '../../../shared/ui/Toast'
-import { useDeploySession } from '../hooks/useDeploySession'
+import { useDeploySessionContext } from '../context/DeploySessionContext'
 import { DeployConsole } from '../components/DeployConsole'
 
 export function FactorioDeployPanel() {
   const { push } = useToast()
-  const deploy = useDeploySession()
+  const deploy = useDeploySessionContext()
   const [instanceName, setInstanceName] = useState('factorio-demo')
   const [installName, setInstallName] = useState('factorio-demo')
   const [version, setVersion] = useState('stable')

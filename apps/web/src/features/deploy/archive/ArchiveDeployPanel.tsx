@@ -2,13 +2,13 @@ import { useState, type FormEvent } from 'react'
 import type { DeploySource, DeployUploadResult } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../../shared/api/client'
 import { useToast } from '../../../shared/ui/Toast'
-import { useDeploySession } from '../hooks/useDeploySession'
+import { useDeploySessionContext } from '../context/DeploySessionContext'
 import { DeployConsole } from '../components/DeployConsole'
 import { SourcePicker } from '../components/SourcePicker'
 
 export function ArchiveDeployPanel() {
   const { push } = useToast()
-  const deploy = useDeploySession()
+  const deploy = useDeploySessionContext()
   const [instanceName, setInstanceName] = useState('archive-demo')
   const [installName, setInstallName] = useState('archive-demo')
   const [source, setSource] = useState<DeploySource>('upload')

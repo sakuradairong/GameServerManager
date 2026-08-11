@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { SteamGameInfo } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../../shared/api/client'
 import { useToast } from '../../../shared/ui/Toast'
-import { useDeploySession } from '../hooks/useDeploySession'
+import { useDeploySessionContext } from '../context/DeploySessionContext'
 import { DeployConsole } from '../components/DeployConsole'
 import { SteamcmdInstallCard } from '../../settings/SteamcmdInstallCard'
 import {
@@ -11,9 +11,9 @@ import {
   type SteamLoginValue,
 } from '../../steam/SteamBranchPicker'
 
-export function SteamDeployPanel() {
+export function SteamDeployPanel({ active = true }: { active?: boolean }) {
   const { push } = useToast()
-  const deploy = useDeploySession()
+  const deploy = useDeploySessionContext()
   const [games, setGames] = useState<Record<string, SteamGameInfo>>({})
   const [gameKey, setGameKey] = useState('')
   const [instanceName, setInstanceName] = useState('')
@@ -30,12 +30,17 @@ export function SteamDeployPanel() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!active) return
     let cancelled = false
     ;(async () => {
       try {
         const [catalog, config] = await Promise.all([
-          apiClient.get<Record<string, SteamGameInfo>>('/api/v1/catalog/steam-games'),
-          apiClient.get<{ steamcmd: { configured: boolean } }>('/api/v1/config/public'),
+          apiClient.get<Record<string, SteamGameInfo>>('/api/v1/catalog/steam-games', {
+            cacheTtlMs: 120_000,
+          }),
+          apiClient.get<{ steamcmd: { configured: boolean } }>('/api/v1/config/public', {
+            cacheTtlMs: 30_000,
+          }),
         ])
         if (cancelled) return
         setGames(catalog)
@@ -61,7 +66,7 @@ export function SteamDeployPanel() {
     return () => {
       cancelled = true
     }
-  }, [push])
+  }, [active, push])
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()

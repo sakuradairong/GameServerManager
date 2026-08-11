@@ -19,6 +19,7 @@ import { pluginRoutes } from './routes/plugins.js'
 import { staticWebPlugin } from './plugins/staticWeb.js'
 import { setupRealtime } from './socket/realtime.js'
 import { getConfiguredCorsOrigins } from './lib/cors.js'
+import { resolveTrustProxy } from './lib/trustProxy.js'
 
 async function main() {
   await configManager.init()
@@ -27,8 +28,10 @@ async function main() {
   await pluginManager.init()
   const config = configManager.getConfig()
 
+  const trustProxy = resolveTrustProxy()
   const app = Fastify({
     logger: true,
+    ...(trustProxy !== undefined ? { trustProxy } : {}),
   })
 
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {

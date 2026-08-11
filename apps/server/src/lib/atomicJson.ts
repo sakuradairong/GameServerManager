@@ -15,8 +15,10 @@ export function isFileNotFoundError(error: unknown): boolean {
 export async function writeJsonAtomic(
   filePath: string,
   value: unknown,
-  mode = 0o600,
+  options: { mode?: number; compact?: boolean } = {},
 ): Promise<void> {
+  const mode = options.mode ?? 0o600
+  const compact = options.compact ?? false
   const resolvedPath = path.resolve(filePath)
   const previous = writeQueues.get(resolvedPath) ?? Promise.resolve()
   const scheduled = previous.catch(() => undefined).then(async () => {
@@ -27,10 +29,14 @@ export async function writeJsonAtomic(
     )
 
     try {
-      await fs.writeFile(temporaryPath, JSON.stringify(value, null, 2), {
-        encoding: 'utf8',
-        mode,
-      })
+      await fs.writeFile(
+        temporaryPath,
+        compact ? JSON.stringify(value) : JSON.stringify(value, null, 2),
+        {
+          encoding: 'utf8',
+          mode,
+        },
+      )
       await fs.rename(temporaryPath, resolvedPath)
     } finally {
       await fs.rm(temporaryPath, { force: true }).catch(() => undefined)

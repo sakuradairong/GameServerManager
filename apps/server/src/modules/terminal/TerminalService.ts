@@ -50,6 +50,11 @@ export class TerminalService {
     return session ? this.toMeta(session) : undefined
   }
 
+  getAttachedSocketIds(sessionId: string): string[] {
+    const session = this.sessions.get(sessionId)
+    return session ? [...session.sockets] : []
+  }
+
   createSession(input: {
     sessionId?: string
     name?: string

@@ -49,6 +49,7 @@ const ConfigFileSchema = z
 export class ConfigManager {
   private config: Gsm4Config | null = null
   private dataDir: string | null = null
+  private manifestCache: DataManifest | null = null
 
   private async defaultConfig(): Promise<Gsm4Config> {
     const repoRoot = await resolveRepoRoot()
@@ -100,7 +101,8 @@ export class ConfigManager {
     const manifestPath = path.join(this.dataDir!, 'manifest.json')
     try {
       const raw = await fs.readFile(manifestPath, 'utf8')
-      return DataManifestSchema.parse(JSON.parse(raw))
+      this.manifestCache = DataManifestSchema.parse(JSON.parse(raw))
+      return this.manifestCache
     } catch (error) {
       if (!isFileNotFoundError(error)) {
         throw new Error('data/manifest.json 损坏或无法读取', { cause: error })
@@ -112,14 +114,17 @@ export class ConfigManager {
         migratedFrom: null,
       }
       await writeJsonAtomic(manifestPath, manifest)
+      this.manifestCache = manifest
       return manifest
     }
   }
 
   async getManifest(): Promise<DataManifest> {
+    if (this.manifestCache) return this.manifestCache
     const manifestPath = path.join(this.getDataDir(), 'manifest.json')
     const raw = await fs.readFile(manifestPath, 'utf8')
-    return DataManifestSchema.parse(JSON.parse(raw))
+    this.manifestCache = DataManifestSchema.parse(JSON.parse(raw))
+    return this.manifestCache
   }
 
   async updateSettings(input: {

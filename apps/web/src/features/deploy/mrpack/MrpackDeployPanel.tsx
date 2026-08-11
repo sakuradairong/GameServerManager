@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { DeploySource, DeployUploadResult, MrpackLoader } from '@gsm4/shared'
 import { apiClient, ApiError } from '../../../shared/api/client'
 import { useToast } from '../../../shared/ui/Toast'
-import { useDeploySession } from '../hooks/useDeploySession'
+import { useDeploySessionContext } from '../context/DeploySessionContext'
 import { DeployConsole } from '../components/DeployConsole'
 import { SourcePicker } from '../components/SourcePicker'
 
@@ -18,7 +18,7 @@ const LOADER_OPTIONS: { value: LoaderOption; label: string }[] = [
 
 export function MrpackDeployPanel() {
   const { push } = useToast()
-  const deploy = useDeploySession()
+  const deploy = useDeploySessionContext()
   const [instanceName, setInstanceName] = useState('mrpack-demo')
   const [installName, setInstallName] = useState('mrpack-demo')
   const [source, setSource] = useState<DeploySource>('url')

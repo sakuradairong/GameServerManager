@@ -42,23 +42,36 @@ const UsersFileSchema = z.object({
 
 export class AuthService {
   private registering = false
+  private usersCache: UsersFile | null = null
 
   private usersPath(): string {
     return path.join(configManager.getDataDir(), 'users.json')
   }
 
   private async readUsers(): Promise<UsersFile> {
+    if (this.usersCache) return this.usersCache
     try {
       const raw = await fs.readFile(this.usersPath(), 'utf8')
-      return UsersFileSchema.parse(JSON.parse(raw))
+      const data = UsersFileSchema.parse(JSON.parse(raw))
+      this.usersCache = data
+      return data
     } catch (error) {
-      if (isFileNotFoundError(error)) return { users: [] }
+      if (isFileNotFoundError(error)) {
+        const empty = { users: [] }
+        this.usersCache = empty
+        return empty
+      }
       throw new Error('用户数据损坏或无法读取，已拒绝开放注册', { cause: error })
     }
   }
 
+  private invalidateUsersCache() {
+    this.usersCache = null
+  }
+
   private async writeUsers(data: UsersFile): Promise<void> {
     await writeJsonAtomic(this.usersPath(), UsersFileSchema.parse(data))
+    this.invalidateUsersCache()
   }
 
   async hasUsers(): Promise<boolean> {

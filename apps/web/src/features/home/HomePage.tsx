@@ -15,6 +15,18 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(1)} ${units[idx]}`
 }
 
+function shouldUpdateStats(prev: SystemStats | null, next: SystemStats): boolean {
+  if (!prev) return true
+  if (Math.abs(prev.cpu.usage - next.cpu.usage) >= 0.5) return true
+  if (Math.abs(prev.memory.usage - next.memory.usage) >= 0.5) return true
+  if (Math.abs(prev.load.avg1 - next.load.avg1) >= 0.05) return true
+  const prevDisk = prev.disk?.usage
+  const nextDisk = next.disk?.usage
+  if (prevDisk != null && nextDisk != null && Math.abs(prevDisk - nextDisk) >= 0.5) return true
+  if ((prevDisk == null) !== (nextDisk == null)) return true
+  return false
+}
+
 export function HomePage() {
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [stats, setStats] = useState<SystemStats | null>(null)
@@ -25,7 +37,9 @@ export function HomePage() {
 
     ;(async () => {
       try {
-        const data = await apiClient.get<SystemInfo>('/api/v1/system/info')
+        const data = await apiClient.get<SystemInfo>('/api/v1/system/info', {
+          cacheTtlMs: 60_000,
+        })
         if (!cancelled) setInfo(data)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
@@ -33,7 +47,9 @@ export function HomePage() {
     })()
 
     const socket = getSocket()
-    const onStats = (payload: SystemStats) => setStats(payload)
+    const onStats = (payload: SystemStats) => {
+      setStats((prev) => (shouldUpdateStats(prev, payload) ? payload : prev))
+    }
     socket.emit(RealtimeEvents.subscribeSystemStats)
     socket.on(RealtimeEvents.systemStats, onStats)
 

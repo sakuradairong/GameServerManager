@@ -29,6 +29,8 @@ export const RealtimeEvents = {
   deployComplete: 'deploy:complete',
   deployError: 'deploy:error',
   deployCancel: 'deploy:cancel',
+  deployWatch: 'deploy:watch',
+  deployUnwatch: 'deploy:unwatch',
 
   // steamcmd install
   steamcmdProgress: 'steamcmd:progress',

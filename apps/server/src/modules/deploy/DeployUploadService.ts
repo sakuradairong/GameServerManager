@@ -179,7 +179,7 @@ export class DeployUploadService {
           createdAt: new Date().toISOString(),
           absolutePath,
         }
-        await writeJsonAtomic(path.join(dir, METADATA_FILE), publicResult(stored), 0o600)
+        await writeJsonAtomic(path.join(dir, METADATA_FILE), publicResult(stored), { mode: 0o600 })
         this.uploads.set(uploadId, stored)
         return publicResult(stored)
       } catch (error) {

@@ -4,9 +4,13 @@ import { promisify } from 'node:util'
 import type { SystemInfo, SystemStats } from '@gsm4/shared'
 
 const execFileAsync = promisify(execFile)
+const DISK_SAMPLE_INTERVAL_MS = 30_000
 
 export class SystemService {
   private prevCpu = os.cpus()
+  private cachedDisk: SystemStats['disk'] | undefined
+  private diskSampleAt = 0
+  private diskSampleInFlight: Promise<SystemStats['disk'] | undefined> | null = null
 
   getInfo(): SystemInfo {
     const cpus = os.cpus()
@@ -25,12 +29,12 @@ export class SystemService {
   }
 
   getStats(): SystemStats {
-    const usage = this.sampleCpuUsage()
+    const cpus = os.cpus()
+    const usage = this.sampleCpuUsage(cpus)
     const total = os.totalmem()
     const free = os.freemem()
     const used = total - free
     const load = os.loadavg()
-    const cpus = os.cpus()
 
     return {
       timestamp: new Date().toISOString(),
@@ -55,12 +59,11 @@ export class SystemService {
 
   async getStatsWithDisk(): Promise<SystemStats> {
     const stats = this.getStats()
-    stats.disk = await this.sampleDisk()
+    stats.disk = await this.getDiskUsage()
     return stats
   }
 
-  private sampleCpuUsage(): number {
-    const current = os.cpus()
+  private sampleCpuUsage(current = os.cpus()): number {
     let idleDiff = 0
     let totalDiff = 0
 
@@ -80,7 +83,23 @@ export class SystemService {
     return Math.max(0, Math.min(100, (1 - idleDiff / totalDiff) * 100))
   }
 
-  private async sampleDisk(): Promise<SystemStats['disk']> {
+  private async getDiskUsage(): Promise<SystemStats['disk'] | undefined> {
+    const now = Date.now()
+    if (this.cachedDisk !== undefined && now - this.diskSampleAt < DISK_SAMPLE_INTERVAL_MS) {
+      return this.cachedDisk
+    }
+    if (this.diskSampleInFlight) return this.diskSampleInFlight
+
+    this.diskSampleInFlight = this.sampleDisk().finally(() => {
+      this.diskSampleInFlight = null
+    })
+    const disk = await this.diskSampleInFlight
+    this.cachedDisk = disk
+    this.diskSampleAt = Date.now()
+    return disk
+  }
+
+  private async sampleDisk(): Promise<SystemStats['disk'] | undefined> {
     try {
       if (process.platform === 'win32') {
         return undefined
