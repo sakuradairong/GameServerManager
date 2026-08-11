@@ -14,7 +14,9 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
 
   const loadConfig = useCallback(async () => {
-    const data = await apiClient.get<PublicConfig>('/api/v1/config/public')
+    const data = await apiClient.get<PublicConfig>('/api/v1/config/public', {
+      cacheTtlMs: 30_000,
+    })
     setConfig(data)
     setInstallPath(data.game.defaultInstallPath)
     setSteamcmdPath(data.steamcmd.path)
