@@ -254,6 +254,33 @@ input {
   margin-bottom: 6px;
 }
 
+.stat-meter {
+  margin-top: 12px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  overflow: hidden;
+}
+
+.stat-meter-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, #3b82f6);
+  transition: width 0.35s ease;
+}
+
+.stat-meter.is-ok .stat-meter-bar {
+  background: #22a06b;
+}
+
+.stat-meter.is-warn .stat-meter-bar {
+  background: #d9922b;
+}
+
+.stat-meter.is-crit .stat-meter-bar {
+  background: #d94c4c;
+}
+
 .kv-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
