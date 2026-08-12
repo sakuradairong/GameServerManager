@@ -5,6 +5,7 @@ import { apiClient, ApiError } from '../../shared/api/client'
 import { useToast } from '../../shared/ui/Toast'
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
 import { SteamUpdateDialog } from './SteamUpdateDialog'
+import { BackupDialog } from './BackupDialog'
 
 const emptyForm: CreateInstanceBody = {
   name: '',
@@ -21,6 +22,7 @@ const InstanceRow = memo(function InstanceRow({
   onAction,
   onOpenTerminal,
   onSteamUpdate,
+  onBackup,
   onDelete,
 }: {
   instance: Instance
@@ -28,6 +30,7 @@ const InstanceRow = memo(function InstanceRow({
   onAction: (id: string, action: 'start' | 'stop' | 'restart') => void
   onOpenTerminal: (sessionId: string) => void
   onSteamUpdate: (instance: Instance) => void
+  onBackup: (instance: Instance) => void
   onDelete: (instance: Instance) => void
 }) {
   return (
@@ -101,6 +104,14 @@ const InstanceRow = memo(function InstanceRow({
             更新/分支
           </button>
         )}
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={busy}
+          onClick={() => onBackup(instance)}
+        >
+          备份
+        </button>
         <button
           type="button"
           className="btn btn-danger"
@@ -203,12 +214,17 @@ export function InstancesPage() {
   const [creating, setCreating] = useState(false)
   const [steamUpdateInstance, setSteamUpdateInstance] = useState<Instance | null>(null)
   const [steamUpdateOpen, setSteamUpdateOpen] = useState(false)
+  const [backupInstance, setBackupInstance] = useState<Instance | null>(null)
+  const [backupOpen, setBackupOpen] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Instance | null>(null)
 
   const refresh = useCallback(async () => {
     const data = await apiClient.get<Instance[]>('/api/v1/instances')
     setInstances(data)
     setSteamUpdateInstance((current) =>
+      current ? data.find((instance) => instance.id === current.id) || current : null,
+    )
+    setBackupInstance((current) =>
       current ? data.find((instance) => instance.id === current.id) || current : null,
     )
   }, [])
@@ -283,6 +299,11 @@ export function InstancesPage() {
     setSteamUpdateOpen(true)
   }, [])
 
+  const onBackup = useCallback((instance: Instance) => {
+    setBackupInstance(instance)
+    setBackupOpen(true)
+  }, [])
+
   const onDelete = useCallback((instance: Instance) => {
     setPendingDelete(instance)
   }, [])
@@ -291,7 +312,7 @@ export function InstancesPage() {
     <div className="stack">
       <div className="page-card">
         <h2 className="page-title">实例</h2>
-        <p className="page-desc">创建命令型实例，启停通过 PTY 会话执行（M1）。</p>
+        <p className="page-desc">创建命令型实例，启停通过 PTY；支持备份与恢复（M4）。</p>
       </div>
 
       <CreateInstanceForm creating={creating} onCreated={onCreated} />
@@ -310,6 +331,7 @@ export function InstancesPage() {
                 onAction={onAction}
                 onOpenTerminal={onOpenTerminal}
                 onSteamUpdate={onSteamUpdate}
+                onBackup={onBackup}
                 onDelete={onDelete}
               />
             ))}
@@ -324,6 +346,18 @@ export function InstancesPage() {
           onClose={() => setSteamUpdateOpen(false)}
           onExited={() => setSteamUpdateInstance(null)}
           onUpdated={() => {
+            refresh().catch(() => undefined)
+          }}
+        />
+      )}
+
+      {backupInstance && (
+        <BackupDialog
+          instance={backupInstance}
+          open={backupOpen}
+          onClose={() => setBackupOpen(false)}
+          onExited={() => setBackupInstance(null)}
+          onChanged={() => {
             refresh().catch(() => undefined)
           }}
         />

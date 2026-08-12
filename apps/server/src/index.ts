@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import { configManager } from './modules/config/ConfigManager.js'
 import { instanceService } from './modules/instance/InstanceService.js'
+import { backupService } from './modules/backup/BackupService.js'
 import { deployUploadService } from './modules/deploy/DeployUploadService.js'
 import { pluginManager } from './modules/plugin/PluginManager.js'
 import { healthRoutes } from './routes/health.js'
@@ -10,6 +11,7 @@ import { authRoutes } from './routes/auth.js'
 import { configRoutes } from './routes/config.js'
 import { systemRoutes } from './routes/system.js'
 import { instanceRoutes } from './routes/instances.js'
+import { backupRoutes } from './routes/backup.js'
 import { terminalRoutes } from './routes/terminal.js'
 import { deployRoutes } from './routes/deploy.js'
 import { catalogRoutes } from './routes/catalog.js'
@@ -25,6 +27,7 @@ async function main() {
   await configManager.init()
   await deployUploadService.init()
   await instanceService.init()
+  await backupService.init()
   await pluginManager.init()
   const config = configManager.getConfig()
 
@@ -63,6 +66,7 @@ async function main() {
   await app.register(configRoutes)
   await app.register(systemRoutes)
   await app.register(instanceRoutes)
+  await app.register(backupRoutes)
   await app.register(terminalRoutes)
   await app.register(deployRoutes)
   await app.register(catalogRoutes)
