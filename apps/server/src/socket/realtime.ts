@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http'
 import { Server } from 'socket.io'
-import { RealtimeEvents, type AuthTokenPayload } from '@gsm4/shared'
+import { RealtimeEvents, type AuthTokenPayload, type SystemStats } from '@gsm4/shared'
 import { authService } from '../modules/auth/AuthService.js'
 import { systemService } from '../modules/system/SystemService.js'
 import { terminalService } from '../modules/terminal/TerminalService.js'
@@ -63,6 +63,7 @@ export function setupRealtime(httpServer: HttpServer) {
 
   let statsTimer: NodeJS.Timeout | null = null
   let statsInFlight = false
+  let lastEmittedStats: SystemStats | null = null
 
   const ensureStatsLoop = () => {
     if (statsTimer) return
@@ -73,12 +74,17 @@ export function setupRealtime(httpServer: HttpServer) {
           clearInterval(statsTimer)
           statsTimer = null
         }
+        lastEmittedStats = null
         return
       }
       if (statsInFlight) return
       statsInFlight = true
       try {
         const stats = await systemService.getStatsWithDisk()
+        if (!systemService.statsMeaningfullyChanged(lastEmittedStats, stats)) {
+          return
+        }
+        lastEmittedStats = stats
         io.to('system-stats').emit(RealtimeEvents.systemStats, stats)
       } finally {
         statsInFlight = false
@@ -155,7 +161,9 @@ export function setupRealtime(httpServer: HttpServer) {
     socket.on(RealtimeEvents.subscribeSystemStats, async () => {
       await socket.join('system-stats')
       ensureStatsLoop()
-      socket.emit(RealtimeEvents.systemStats, await systemService.getStatsWithDisk())
+      const stats = await systemService.getStatsWithDisk()
+      lastEmittedStats = stats
+      socket.emit(RealtimeEvents.systemStats, stats)
     })
 
     socket.on(RealtimeEvents.unsubscribeSystemStats, async () => {
